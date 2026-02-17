@@ -6,6 +6,7 @@ from sqlmodel import select
 
 from app.api.auth import router as auth_router
 from app.api.deps import get_current_user
+from app.api.users import router as users_router
 from app.auth import hash_password
 from app.database import engine, init_db
 from app.models.user import User
@@ -40,6 +41,7 @@ app.add_middleware(
 )
 
 app.include_router(auth_router, prefix="/api")
+app.include_router(users_router, prefix="/api")
 
 # Stub router for agents — will be replaced by full CRUD in Task 5
 agents_router = APIRouter(prefix="/agents", tags=["agents"])
