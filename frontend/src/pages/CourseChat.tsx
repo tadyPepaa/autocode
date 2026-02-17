@@ -123,7 +123,7 @@ export default function CourseChat() {
             {subject && (
               <>
                 <Link
-                  to={`/agents/${course.subject_id}`}
+                  to={`/agents/${subject.agent_id}`}
                   className="hover:text-gray-300"
                 >
                   {subject.name}
