@@ -61,6 +61,29 @@ class SendMessageResponse(BaseModel):
     status: str
 
 
+class MessageResponse(BaseModel):
+    id: int
+    user_id: int
+    session_type: str
+    session_id: int
+    role: str
+    content: str
+    created_at: datetime
+
+
+class FileInfo(BaseModel):
+    name: str
+    path: str
+    size: int
+    modified_at: float
+
+
+class FileContent(BaseModel):
+    name: str
+    path: str
+    content: str
+
+
 # --- Helpers ---
 
 
@@ -295,6 +318,81 @@ async def stop_research_session(
     db.commit()
     db.refresh(research)
     return research
+
+
+@router.get(
+    "/research/{session_id}/messages",
+    response_model=list[MessageResponse],
+)
+async def get_research_messages(
+    session_id: int,
+    db: Session = Depends(get_session),
+    user: User = Depends(get_current_user),
+):
+    _get_session_or_404(session_id, user, db)
+    messages = db.exec(
+        select(ChatMessage)
+        .where(
+            ChatMessage.session_type == "research",
+            ChatMessage.session_id == session_id,
+        )
+        .order_by(ChatMessage.created_at)
+    ).all()
+    return messages
+
+
+@router.get(
+    "/research/{session_id}/files",
+    response_model=list[FileInfo],
+)
+async def list_research_files(
+    session_id: int,
+    db: Session = Depends(get_session),
+    user: User = Depends(get_current_user),
+):
+    research = _get_session_or_404(session_id, user, db)
+    workspace = Path(research.workspace_path)
+    if not workspace.exists():
+        return []
+
+    files = []
+    for md_file in sorted(workspace.rglob("*.md")):
+        # Skip hidden dirs like .claude/
+        if any(part.startswith(".") for part in md_file.relative_to(workspace).parts):
+            continue
+        stat = md_file.stat()
+        files.append(FileInfo(
+            name=md_file.name,
+            path=str(md_file.relative_to(workspace)),
+            size=stat.st_size,
+            modified_at=stat.st_mtime,
+        ))
+    files.sort(key=lambda f: f.modified_at, reverse=True)
+    return files
+
+
+@router.get(
+    "/research/{session_id}/file-content",
+    response_model=FileContent,
+)
+async def get_research_file_content(
+    session_id: int,
+    path: str,
+    db: Session = Depends(get_session),
+    user: User = Depends(get_current_user),
+):
+    research = _get_session_or_404(session_id, user, db)
+    workspace = Path(research.workspace_path)
+    target = (workspace / path).resolve()
+
+    if not str(target).startswith(str(workspace.resolve())):
+        raise HTTPException(status_code=400, detail="Invalid file path")
+
+    if not target.exists() or not target.is_file():
+        raise HTTPException(status_code=404, detail="File not found")
+
+    content = target.read_text(encoding="utf-8")
+    return FileContent(name=target.name, path=path, content=content)
 
 
 # --- WebSocket ---
