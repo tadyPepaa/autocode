@@ -252,8 +252,11 @@ async def start_project(
     workspace.mkdir(parents=True, exist_ok=True)
     tmux.create_session(project.tmux_session, str(workspace))
 
-    # Send claude command to start Claude Code
-    tmux.send_keys(project.tmux_session, "claude")
+    # Send claude command to start Claude Code (skip permission prompts)
+    tmux.send_keys(
+        project.tmux_session,
+        "claude --dangerously-skip-permissions",
+    )
 
     # Create AgentInstance record
     instance = AgentInstance(
@@ -339,8 +342,11 @@ async def restart_project(
     workspace.mkdir(parents=True, exist_ok=True)
     tmux.create_session(project.tmux_session, str(workspace))
 
-    # Send claude command
-    tmux.send_keys(project.tmux_session, "claude")
+    # Send claude command (skip permission prompts)
+    tmux.send_keys(
+        project.tmux_session,
+        "claude --dangerously-skip-permissions",
+    )
 
     # Create new AgentInstance
     new_instance = AgentInstance(

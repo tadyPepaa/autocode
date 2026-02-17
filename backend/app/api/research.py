@@ -126,9 +126,9 @@ async def create_research_session(
 
     tmux_session = f"{user.username}-research-{slug}"
 
-    # Create tmux session and start claude
+    # Create tmux session and start claude (skip permission prompts)
     tmux.create_session(tmux_session, str(workspace))
-    tmux.send_keys(tmux_session, "claude")
+    tmux.send_keys(tmux_session, "claude --dangerously-skip-permissions")
 
     research = ResearchSession(
         user_id=user.id,
@@ -240,7 +240,10 @@ async def resume_research_session(
         workspace = Path(research.workspace_path)
         workspace.mkdir(parents=True, exist_ok=True)
         tmux.create_session(research.tmux_session, str(workspace))
-        tmux.send_keys(research.tmux_session, "claude --resume")
+        tmux.send_keys(
+            research.tmux_session,
+            "claude --dangerously-skip-permissions --resume",
+        )
 
     research.status = "active"
     research.updated_at = datetime.utcnow()

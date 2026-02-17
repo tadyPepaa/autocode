@@ -315,7 +315,7 @@ def test_start_project(
 
     # Verify claude command was sent
     call_args = mock_tmux.send_keys.call_args
-    assert call_args[0][1] == "claude"
+    assert "claude" in call_args[0][1]
 
 
 def test_start_already_running_project(

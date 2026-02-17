@@ -87,7 +87,7 @@ def test_create_research_session(
     mock_tmux.create_session.assert_called_once()
     mock_tmux.send_keys.assert_called_once()
     call_args = mock_tmux.send_keys.call_args
-    assert call_args[0][1] == "claude"
+    assert "claude" in call_args[0][1]
 
 
 def test_create_research_slug_generation(
@@ -445,7 +445,7 @@ def test_resume_research_session(
     # create_session called twice: initial create + resume
     assert mock_tmux.create_session.call_count == 2
     last_send = mock_tmux.send_keys.call_args_list[-1]
-    assert last_send[0][1] == "claude --resume"
+    assert "claude" in last_send[0][1] and "--resume" in last_send[0][1]
 
 
 def test_resume_already_running(
