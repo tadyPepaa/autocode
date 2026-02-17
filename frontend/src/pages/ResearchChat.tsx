@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { useResearchSession, useResearchAction, useSendMessage, useUpdateResearch } from '../api/research';
+import { useResearchSession, useCancelResearch, useSendMessage, useUpdateResearch } from '../api/research';
 import ChatInterface from '../components/ChatInterface';
 
 const statusColors: Record<string, string> = {
@@ -57,15 +57,11 @@ export default function ResearchChat() {
   const sessionId = Number(id);
   const navigate = useNavigate();
   const { data: session, isLoading, isError } = useResearchSession(sessionId);
-  const researchAction = useResearchAction();
+  const cancelResearch = useCancelResearch();
   const sendMessage = useSendMessage();
 
   async function handleSendMessage(content: string) {
     await sendMessage.mutateAsync({ sessionId, content });
-  }
-
-  function handleAction(action: 'resume' | 'stop') {
-    researchAction.mutate({ id: sessionId, action });
   }
 
   if (isLoading) {
@@ -110,22 +106,13 @@ export default function ResearchChat() {
         </div>
 
         <div className="flex gap-2">
-          {session.status === 'stopped' && (
-            <button
-              onClick={() => handleAction('resume')}
-              disabled={researchAction.isPending}
-              className="rounded-lg bg-green-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-green-500 disabled:opacity-50"
-            >
-              Resume
-            </button>
-          )}
           {session.status === 'active' && (
             <button
-              onClick={() => handleAction('stop')}
-              disabled={researchAction.isPending}
+              onClick={() => cancelResearch.mutate(sessionId)}
+              disabled={cancelResearch.isPending}
               className="rounded-lg bg-red-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-red-500 disabled:opacity-50"
             >
-              Stop
+              Cancel
             </button>
           )}
         </div>
