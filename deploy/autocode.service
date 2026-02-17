@@ -1,0 +1,16 @@
+[Unit]
+Description=AutoCode Backend
+After=network.target
+
+[Service]
+Type=simple
+User=autocode
+WorkingDirectory=/opt/autocode/backend
+Environment=AUTOCODE_SECRET_KEY=changeme
+Environment=AUTOCODE_DATA_DIR=/opt/autocode/data
+ExecStart=/opt/autocode/backend/.venv/bin/uvicorn app.main:app --host 0.0.0.0 --port 8000
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

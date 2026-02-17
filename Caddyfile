@@ -1,0 +1,20 @@
+autocode.example.com {
+    # Frontend (static files)
+    root * /opt/autocode/frontend/dist
+    file_server
+
+    # API proxy
+    handle /api/* {
+        reverse_proxy localhost:8000
+    }
+
+    # WebSocket proxy
+    handle /ws/* {
+        reverse_proxy localhost:8000
+    }
+
+    # SPA fallback
+    handle {
+        try_files {path} /index.html
+    }
+}
