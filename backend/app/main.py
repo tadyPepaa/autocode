@@ -10,6 +10,7 @@ from app.api.learning import router as learning_router
 from app.api.projects import router as projects_router
 from app.api.research import router as research_router
 from app.api.users import router as users_router
+from app.api.social import router as social_router
 from app.api.ws import router as ws_router
 from app.auth import hash_password
 from app.database import engine, init_db
@@ -50,6 +51,7 @@ app.include_router(agents_router, prefix="/api")
 app.include_router(projects_router, prefix="/api")
 app.include_router(research_router, prefix="/api")
 app.include_router(learning_router, prefix="/api")
+app.include_router(social_router, prefix="/api")
 app.include_router(ws_router)
 
 
