@@ -1,9 +1,10 @@
+import asyncio
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from fastapi.testclient import TestClient
-from sqlmodel import Session
+from sqlmodel import Session, select
 
 from app.config import settings
 from app.models.agent import Agent
@@ -32,14 +33,10 @@ def agent(session: Session, user_token: str, client: TestClient) -> dict:
 
 
 @pytest.fixture
-def mock_tmux():
-    """Mock TmuxManager for tests that involve tmux operations."""
-    with patch("app.api.research.tmux") as mock:
-        mock.create_session = MagicMock()
-        mock.kill_session = MagicMock()
-        mock.send_keys = MagicMock()
-        mock.session_exists = MagicMock(return_value=False)
-        mock.capture_pane = MagicMock(return_value="")
+def mock_claude():
+    """Mock run_claude_message for tests that involve Claude CLI."""
+    with patch("app.api.research.run_claude_message", new_callable=AsyncMock) as mock:
+        mock.return_value = "Claude response"
         yield mock
 
 
@@ -65,7 +62,6 @@ def test_create_research_session(
     user_token: str,
     agent: dict,
     data_dir: Path,
-    mock_tmux,
 ):
     resp = _create_research(
         client, user_token, agent["id"], name="Deep Learning Research"
@@ -74,20 +70,14 @@ def test_create_research_session(
     data = resp.json()
     assert data["name"] == "Deep Learning Research"
     assert data["slug"] == "deep-learning-research"
-    assert data["status"] == "active"
+    assert data["status"] == "idle"
     assert data["agent_id"] == agent["id"]
-    assert "testuser" in data["tmux_session"]
-    assert "research" in data["tmux_session"]
 
-    # Verify workspace was created
+    # Verify workspace was created with CLAUDE.md
     workspace = Path(data["workspace_path"])
     assert workspace.exists()
-
-    # Verify tmux session was created and claude started
-    mock_tmux.create_session.assert_called_once()
-    mock_tmux.send_keys.assert_called_once()
-    call_args = mock_tmux.send_keys.call_args
-    assert "claude" in call_args[0][1]
+    claude_md = workspace / "CLAUDE.md"
+    assert claude_md.exists()
 
 
 def test_create_research_slug_generation(
@@ -95,7 +85,6 @@ def test_create_research_slug_generation(
     user_token: str,
     agent: dict,
     data_dir: Path,
-    mock_tmux,
 ):
     resp = _create_research(
         client, user_token, agent["id"], name="Hello World! @#$ Research"
@@ -109,7 +98,6 @@ def test_create_research_invalid_name(
     user_token: str,
     agent: dict,
     data_dir: Path,
-    mock_tmux,
 ):
     resp = _create_research(client, user_token, agent["id"], name="@#$%")
     assert resp.status_code == 400
@@ -120,22 +108,9 @@ def test_create_research_invalid_agent(
     client: TestClient,
     user_token: str,
     data_dir: Path,
-    mock_tmux,
 ):
     resp = _create_research(client, user_token, 9999, name="Bad")
     assert resp.status_code == 404
-
-
-def test_create_research_tmux_naming(
-    client: TestClient,
-    user_token: str,
-    agent: dict,
-    data_dir: Path,
-    mock_tmux,
-):
-    resp = _create_research(client, user_token, agent["id"], name="AI Safety")
-    data = resp.json()
-    assert data["tmux_session"] == "testuser-research-ai-safety"
 
 
 def test_create_research_workspace_path(
@@ -143,12 +118,31 @@ def test_create_research_workspace_path(
     user_token: str,
     agent: dict,
     data_dir: Path,
-    mock_tmux,
 ):
     resp = _create_research(client, user_token, agent["id"], name="Neural Nets")
     data = resp.json()
     expected = str(data_dir / "testuser" / "research" / "neural-nets")
     assert data["workspace_path"] == expected
+
+
+def test_create_research_writes_claude_md(
+    client: TestClient,
+    user_token: str,
+    agent: dict,
+    data_dir: Path,
+):
+    # Update agent identity first
+    client.put(
+        f"/api/agents/{agent['id']}",
+        json={"identity": "You are a research expert."},
+        headers={"Authorization": f"Bearer {user_token}"},
+    )
+
+    resp = _create_research(client, user_token, agent["id"], name="Identity Test")
+    workspace = Path(resp.json()["workspace_path"])
+    claude_md = workspace / "CLAUDE.md"
+    assert claude_md.exists()
+    assert "research expert" in claude_md.read_text()
 
 
 # --- List research sessions tests ---
@@ -159,7 +153,6 @@ def test_list_research_sessions(
     user_token: str,
     agent: dict,
     data_dir: Path,
-    mock_tmux,
 ):
     _create_research(client, user_token, agent["id"], name="Topic One")
     _create_research(client, user_token, agent["id"], name="Topic Two")
@@ -208,7 +201,6 @@ def test_get_research_session(
     user_token: str,
     agent: dict,
     data_dir: Path,
-    mock_tmux,
 ):
     create_resp = _create_research(
         client, user_token, agent["id"], name="Detail Test"
@@ -244,7 +236,6 @@ def test_delete_research_session(
     user_token: str,
     agent: dict,
     data_dir: Path,
-    mock_tmux,
 ):
     create_resp = _create_research(
         client, user_token, agent["id"], name="Delete Me"
@@ -263,9 +254,6 @@ def test_delete_research_session(
 
     # Verify workspace cleaned up
     assert not Path(workspace_path).exists()
-
-    # Verify tmux kill was called
-    mock_tmux.kill_session.assert_called()
 
     # Verify session is gone
     resp = client.get(
@@ -291,7 +279,6 @@ def test_delete_research_cleans_chat_messages(
     user_token: str,
     agent: dict,
     data_dir: Path,
-    mock_tmux,
     session: Session,
 ):
     create_resp = _create_research(
@@ -299,16 +286,18 @@ def test_delete_research_cleans_chat_messages(
     )
     session_id = create_resp.json()["id"]
 
-    # Send a message
-    client.post(
-        f"/api/research/{session_id}/message",
-        json={"content": "Hello Claude"},
-        headers={"Authorization": f"Bearer {user_token}"},
+    # Add messages directly to DB (avoid background task timing issues)
+    msg = ChatMessage(
+        user_id=2,
+        session_type="research",
+        session_id=session_id,
+        role="user",
+        content="Hello Claude",
     )
+    session.add(msg)
+    session.commit()
 
     # Verify message exists
-    from sqlmodel import select
-
     messages = session.exec(
         select(ChatMessage).where(
             ChatMessage.session_type == "research",
@@ -341,7 +330,7 @@ def test_send_message(
     user_token: str,
     agent: dict,
     data_dir: Path,
-    mock_tmux,
+    mock_claude,
 ):
     create_resp = _create_research(
         client, user_token, agent["id"], name="Chat Session"
@@ -356,21 +345,16 @@ def test_send_message(
     assert resp.status_code == 201
     data = resp.json()
     assert data["content"] == "What is transformer architecture?"
-    assert data["status"] == "sent"
+    assert data["status"] == "thinking"
     assert "id" in data
 
-    # Verify tmux send_keys was called (create + message)
-    assert mock_tmux.send_keys.call_count == 2
-    last_call = mock_tmux.send_keys.call_args_list[-1]
-    assert last_call[0][1] == "What is transformer architecture?"
 
-
-def test_send_message_stores_in_db(
+def test_send_message_stores_user_msg_in_db(
     client: TestClient,
     user_token: str,
     agent: dict,
     data_dir: Path,
-    mock_tmux,
+    mock_claude,
     session: Session,
 ):
     create_resp = _create_research(
@@ -384,17 +368,21 @@ def test_send_message_stores_in_db(
         headers={"Authorization": f"Bearer {user_token}"},
     )
 
-    from sqlmodel import select
-
+    # User message is stored synchronously before background task
     messages = session.exec(
         select(ChatMessage).where(
             ChatMessage.session_type == "research",
             ChatMessage.session_id == session_id,
         )
     ).all()
-    assert len(messages) == 1
+    assert len(messages) >= 1
     assert messages[0].role == "user"
     assert messages[0].content == "Test message"
+
+    # Verify Claude was called
+    mock_claude.assert_called_once()
+    call_kwargs = mock_claude.call_args
+    assert call_kwargs[1]["message"] == "Test message" or call_kwargs[0][1] == "Test message"
 
 
 def test_send_message_not_found(
@@ -409,116 +397,211 @@ def test_send_message_not_found(
     assert resp.status_code == 404
 
 
-# --- Resume tests ---
-
-
-def test_resume_research_session(
+def test_send_message_sets_thinking_status(
     client: TestClient,
     user_token: str,
     agent: dict,
     data_dir: Path,
-    mock_tmux,
+    mock_claude,
 ):
     create_resp = _create_research(
-        client, user_token, agent["id"], name="Resume Me"
+        client, user_token, agent["id"], name="Thinking Test"
     )
     session_id = create_resp.json()["id"]
 
-    # Stop first
-    client.post(
-        f"/api/research/{session_id}/stop",
-        headers={"Authorization": f"Bearer {user_token}"},
-    )
-
-    # tmux.session_exists returns False (session was killed)
-    mock_tmux.session_exists.return_value = False
-
     resp = client.post(
-        f"/api/research/{session_id}/resume",
+        f"/api/research/{session_id}/message",
+        json={"content": "Think about this"},
         headers={"Authorization": f"Bearer {user_token}"},
     )
-    assert resp.status_code == 200
-    data = resp.json()
-    assert data["status"] == "active"
-
-    # Verify tmux was recreated and claude --resume was sent
-    # create_session called twice: initial create + resume
-    assert mock_tmux.create_session.call_count == 2
-    last_send = mock_tmux.send_keys.call_args_list[-1]
-    assert "claude" in last_send[0][1] and "--resume" in last_send[0][1]
+    assert resp.json()["status"] == "thinking"
 
 
-def test_resume_already_running(
+# --- Cancel tests ---
+
+
+def test_cancel_research(
     client: TestClient,
     user_token: str,
     agent: dict,
     data_dir: Path,
-    mock_tmux,
 ):
     create_resp = _create_research(
-        client, user_token, agent["id"], name="Still Running"
+        client, user_token, agent["id"], name="Cancel Me"
     )
     session_id = create_resp.json()["id"]
 
-    # tmux session still exists
-    mock_tmux.session_exists.return_value = True
-
     resp = client.post(
-        f"/api/research/{session_id}/resume",
+        f"/api/research/{session_id}/cancel",
         headers={"Authorization": f"Bearer {user_token}"},
     )
     assert resp.status_code == 200
-    data = resp.json()
-    assert data["status"] == "active"
-
-    # Should NOT create a new tmux session (only 1 from initial create)
-    assert mock_tmux.create_session.call_count == 1
+    assert resp.json()["status"] == "idle"
 
 
-def test_resume_not_found(
+def test_cancel_not_found(
     client: TestClient,
     user_token: str,
 ):
     resp = client.post(
-        "/api/research/9999/resume",
+        "/api/research/9999/cancel",
         headers={"Authorization": f"Bearer {user_token}"},
     )
     assert resp.status_code == 404
 
 
-# --- Stop tests ---
+# --- Messages endpoint tests ---
 
 
-def test_stop_research_session(
+def test_get_research_messages(
     client: TestClient,
     user_token: str,
     agent: dict,
     data_dir: Path,
-    mock_tmux,
+    session: Session,
 ):
-    create_resp = _create_research(
-        client, user_token, agent["id"], name="Stop Me"
-    )
+    create_resp = _create_research(client, user_token, agent["id"], name="Messages")
     session_id = create_resp.json()["id"]
 
-    resp = client.post(
-        f"/api/research/{session_id}/stop",
+    for role, content in [
+        ("user", "What is AI?"),
+        ("assistant", "AI is artificial intelligence."),
+        ("user", "Tell me more"),
+    ]:
+        msg = ChatMessage(
+            user_id=2,
+            session_type="research",
+            session_id=session_id,
+            role=role,
+            content=content,
+        )
+        session.add(msg)
+    session.commit()
+
+    resp = client.get(
+        f"/api/research/{session_id}/messages",
         headers={"Authorization": f"Bearer {user_token}"},
     )
     assert resp.status_code == 200
     data = resp.json()
-    assert data["status"] == "stopped"
+    assert len(data) == 3
+    assert data[0]["role"] == "user"
+    assert data[0]["content"] == "What is AI?"
 
-    # Verify tmux kill was called
-    mock_tmux.kill_session.assert_called()
 
-
-def test_stop_not_found(
+def test_get_research_messages_empty(
     client: TestClient,
     user_token: str,
+    agent: dict,
+    data_dir: Path,
 ):
-    resp = client.post(
-        "/api/research/9999/stop",
+    create_resp = _create_research(client, user_token, agent["id"], name="Empty")
+    session_id = create_resp.json()["id"]
+
+    resp = client.get(
+        f"/api/research/{session_id}/messages",
+        headers={"Authorization": f"Bearer {user_token}"},
+    )
+    assert resp.status_code == 200
+    assert resp.json() == []
+
+
+def test_get_research_messages_not_found(client: TestClient, user_token: str):
+    resp = client.get(
+        "/api/research/9999/messages",
+        headers={"Authorization": f"Bearer {user_token}"},
+    )
+    assert resp.status_code == 404
+
+
+# --- Files endpoint tests ---
+
+
+def test_list_research_files(
+    client: TestClient,
+    user_token: str,
+    agent: dict,
+    data_dir: Path,
+):
+    create_resp = _create_research(client, user_token, agent["id"], name="Files Test")
+    workspace = Path(create_resp.json()["workspace_path"])
+    (workspace / "research.md").write_text("# Research\n\nSome content")
+    (workspace / "notes.md").write_text("# Notes")
+    (workspace / "data.csv").write_text("a,b,c")
+
+    resp = client.get(
+        f"/api/research/{create_resp.json()['id']}/files",
+        headers={"Authorization": f"Bearer {user_token}"},
+    )
+    assert resp.status_code == 200
+    data = resp.json()
+    names = {f["name"] for f in data}
+    assert "research.md" in names
+    assert "notes.md" in names
+    assert "data.csv" not in names
+
+
+def test_list_research_files_empty(
+    client: TestClient,
+    user_token: str,
+    agent: dict,
+    data_dir: Path,
+):
+    create_resp = _create_research(client, user_token, agent["id"], name="No Extra Files")
+    resp = client.get(
+        f"/api/research/{create_resp.json()['id']}/files",
+        headers={"Authorization": f"Bearer {user_token}"},
+    )
+    assert resp.status_code == 200
+    assert isinstance(resp.json(), list)
+
+
+def test_get_research_file_content(
+    client: TestClient,
+    user_token: str,
+    agent: dict,
+    data_dir: Path,
+):
+    create_resp = _create_research(client, user_token, agent["id"], name="Content Test")
+    workspace = Path(create_resp.json()["workspace_path"])
+    (workspace / "output.md").write_text("# Output\n\nHello world")
+
+    resp = client.get(
+        f"/api/research/{create_resp.json()['id']}/file-content",
+        params={"path": "output.md"},
+        headers={"Authorization": f"Bearer {user_token}"},
+    )
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["content"] == "# Output\n\nHello world"
+    assert data["name"] == "output.md"
+
+
+def test_get_research_file_content_traversal_blocked(
+    client: TestClient,
+    user_token: str,
+    agent: dict,
+    data_dir: Path,
+):
+    create_resp = _create_research(client, user_token, agent["id"], name="Traversal")
+    resp = client.get(
+        f"/api/research/{create_resp.json()['id']}/file-content",
+        params={"path": "../../etc/passwd"},
+        headers={"Authorization": f"Bearer {user_token}"},
+    )
+    assert resp.status_code == 400
+
+
+def test_get_research_file_content_not_found(
+    client: TestClient,
+    user_token: str,
+    agent: dict,
+    data_dir: Path,
+):
+    create_resp = _create_research(client, user_token, agent["id"], name="Missing")
+    resp = client.get(
+        f"/api/research/{create_resp.json()['id']}/file-content",
+        params={"path": "nonexistent.md"},
         headers={"Authorization": f"Bearer {user_token}"},
     )
     assert resp.status_code == 404
@@ -532,7 +615,6 @@ def test_cannot_access_other_users_research(
     user_token: str,
     admin_token: str,
     data_dir: Path,
-    mock_tmux,
 ):
     # Create agent as admin
     agent_resp = client.post(
@@ -570,16 +652,9 @@ def test_cannot_access_other_users_research(
     )
     assert resp.status_code == 404
 
-    # User tries to resume
+    # User tries to cancel
     resp = client.post(
-        f"/api/research/{session_id}/resume",
-        headers={"Authorization": f"Bearer {user_token}"},
-    )
-    assert resp.status_code == 404
-
-    # User tries to stop
-    resp = client.post(
-        f"/api/research/{session_id}/stop",
+        f"/api/research/{session_id}/cancel",
         headers={"Authorization": f"Bearer {user_token}"},
     )
     assert resp.status_code == 404
@@ -590,7 +665,6 @@ def test_cannot_list_other_users_research(
     user_token: str,
     admin_token: str,
     data_dir: Path,
-    mock_tmux,
 ):
     # Admin creates agent
     agent_resp = client.post(
@@ -605,7 +679,7 @@ def test_cannot_list_other_users_research(
         client, admin_token, admin_agent_id, name="Secret Research"
     )
 
-    # User tries to list admin's agent research - should get 404 (not their agent)
+    # User tries to list admin's agent research — should get 404
     resp = client.get(
         f"/api/agents/{admin_agent_id}/research",
         headers={"Authorization": f"Bearer {user_token}"},
@@ -633,171 +707,3 @@ def test_list_research_requires_auth(
 ):
     resp = client.get(f"/api/agents/{agent['id']}/research")
     assert resp.status_code in [401, 403]
-
-
-# --- Get research messages tests ---
-
-
-def test_get_research_messages(
-    client: TestClient,
-    user_token: str,
-    agent: dict,
-    data_dir: Path,
-    mock_tmux,
-    session: Session,
-):
-    create_resp = _create_research(client, user_token, agent["id"], name="Messages")
-    session_id = create_resp.json()["id"]
-
-    from app.models.common import ChatMessage as ChatMessageModel
-    for role, content in [
-        ("user", "What is AI?"),
-        ("assistant", "AI is artificial intelligence."),
-        ("user", "Tell me more"),
-    ]:
-        msg = ChatMessageModel(
-            user_id=2,
-            session_type="research",
-            session_id=session_id,
-            role=role,
-            content=content,
-        )
-        session.add(msg)
-    session.commit()
-
-    resp = client.get(
-        f"/api/research/{session_id}/messages",
-        headers={"Authorization": f"Bearer {user_token}"},
-    )
-    assert resp.status_code == 200
-    data = resp.json()
-    assert len(data) == 3
-    assert data[0]["role"] == "user"
-    assert data[0]["content"] == "What is AI?"
-
-
-def test_get_research_messages_empty(
-    client: TestClient,
-    user_token: str,
-    agent: dict,
-    data_dir: Path,
-    mock_tmux,
-):
-    create_resp = _create_research(client, user_token, agent["id"], name="Empty")
-    session_id = create_resp.json()["id"]
-
-    resp = client.get(
-        f"/api/research/{session_id}/messages",
-        headers={"Authorization": f"Bearer {user_token}"},
-    )
-    assert resp.status_code == 200
-    assert resp.json() == []
-
-
-def test_get_research_messages_not_found(client: TestClient, user_token: str):
-    resp = client.get(
-        "/api/research/9999/messages",
-        headers={"Authorization": f"Bearer {user_token}"},
-    )
-    assert resp.status_code == 404
-
-
-# --- List research files tests ---
-
-
-def test_list_research_files(
-    client: TestClient,
-    user_token: str,
-    agent: dict,
-    data_dir: Path,
-    mock_tmux,
-):
-    create_resp = _create_research(client, user_token, agent["id"], name="Files Test")
-    workspace = Path(create_resp.json()["workspace_path"])
-    (workspace / "research.md").write_text("# Research\n\nSome content")
-    (workspace / "notes.md").write_text("# Notes")
-    (workspace / "data.csv").write_text("a,b,c")
-
-    resp = client.get(
-        f"/api/research/{create_resp.json()['id']}/files",
-        headers={"Authorization": f"Bearer {user_token}"},
-    )
-    assert resp.status_code == 200
-    data = resp.json()
-    names = {f["name"] for f in data}
-    assert "research.md" in names
-    assert "notes.md" in names
-    assert "data.csv" not in names
-
-
-def test_list_research_files_empty(
-    client: TestClient,
-    user_token: str,
-    agent: dict,
-    data_dir: Path,
-    mock_tmux,
-):
-    create_resp = _create_research(client, user_token, agent["id"], name="No Files")
-    resp = client.get(
-        f"/api/research/{create_resp.json()['id']}/files",
-        headers={"Authorization": f"Bearer {user_token}"},
-    )
-    assert resp.status_code == 200
-    assert resp.json() == []
-
-
-# --- Get research file content tests ---
-
-
-def test_get_research_file_content(
-    client: TestClient,
-    user_token: str,
-    agent: dict,
-    data_dir: Path,
-    mock_tmux,
-):
-    create_resp = _create_research(client, user_token, agent["id"], name="Content Test")
-    workspace = Path(create_resp.json()["workspace_path"])
-    (workspace / "output.md").write_text("# Output\n\nHello world")
-
-    resp = client.get(
-        f"/api/research/{create_resp.json()['id']}/file-content",
-        params={"path": "output.md"},
-        headers={"Authorization": f"Bearer {user_token}"},
-    )
-    assert resp.status_code == 200
-    data = resp.json()
-    assert data["content"] == "# Output\n\nHello world"
-    assert data["name"] == "output.md"
-
-
-def test_get_research_file_content_traversal_blocked(
-    client: TestClient,
-    user_token: str,
-    agent: dict,
-    data_dir: Path,
-    mock_tmux,
-):
-    create_resp = _create_research(client, user_token, agent["id"], name="Traversal")
-    resp = client.get(
-        f"/api/research/{create_resp.json()['id']}/file-content",
-        params={"path": "../../etc/passwd"},
-        headers={"Authorization": f"Bearer {user_token}"},
-    )
-    assert resp.status_code == 400
-
-
-def test_get_research_file_content_not_found(
-    client: TestClient,
-    user_token: str,
-    agent: dict,
-    data_dir: Path,
-    mock_tmux,
-):
-    create_resp = _create_research(client, user_token, agent["id"], name="Missing")
-    resp = client.get(
-        f"/api/research/{create_resp.json()['id']}/file-content",
-        params={"path": "nonexistent.md"},
-        headers={"Authorization": f"Bearer {user_token}"},
-    )
-    assert resp.status_code == 404

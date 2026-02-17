@@ -4,7 +4,7 @@ import shutil
 from datetime import datetime
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, HTTPException, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from sqlmodel import Session, select
 
@@ -15,11 +15,12 @@ from app.models.agent import Agent
 from app.models.common import ChatMessage
 from app.models.research import ResearchSession
 from app.models.user import User
-from app.services.tmux import TmuxManager
+from app.services.research_runner import run_claude_message
 
 router = APIRouter(tags=["research"])
 
-tmux = TmuxManager()
+# Track running background tasks by session_id for cancellation
+_running_tasks: dict[int, asyncio.Task] = {}
 
 
 def _generate_slug(name: str) -> str:
@@ -84,6 +85,10 @@ class FileContent(BaseModel):
     content: str
 
 
+class UpdateResearchRequest(BaseModel):
+    name: str
+
+
 # --- Helpers ---
 
 
@@ -103,6 +108,51 @@ def _get_agent_or_404(
     if not agent or agent.user_id != user.id:
         raise HTTPException(status_code=404, detail="Agent not found")
     return agent
+
+
+async def _process_claude_response(
+    session_id: int,
+    user_id: int,
+    workspace_path: str,
+    user_message: str,
+    is_continuation: bool,
+) -> None:
+    """Background task: run Claude CLI and store response."""
+    with Session(engine) as db:
+        try:
+            response_text = await run_claude_message(
+                workspace_path=workspace_path,
+                message=user_message,
+                is_continuation=is_continuation,
+            )
+
+            assistant_msg = ChatMessage(
+                user_id=user_id,
+                session_type="research",
+                session_id=session_id,
+                role="assistant",
+                content=response_text,
+            )
+            db.add(assistant_msg)
+
+        except Exception as e:
+            error_msg = ChatMessage(
+                user_id=user_id,
+                session_type="research",
+                session_id=session_id,
+                role="assistant",
+                content=f"Error: {str(e)}",
+            )
+            db.add(error_msg)
+
+        finally:
+            research = db.get(ResearchSession, session_id)
+            if research:
+                research.status = "idle"
+                research.updated_at = datetime.utcnow()
+                db.add(research)
+            db.commit()
+            _running_tasks.pop(session_id, None)
 
 
 # --- Endpoints ---
@@ -138,7 +188,7 @@ async def create_research_session(
     db: Session = Depends(get_session),
     user: User = Depends(get_current_user),
 ):
-    _get_agent_or_404(agent_id, user, db)
+    agent = _get_agent_or_404(agent_id, user, db)
 
     slug = _generate_slug(body.name)
     if not slug:
@@ -147,19 +197,18 @@ async def create_research_session(
     workspace = Path(settings.data_dir) / user.username / "research" / slug
     workspace.mkdir(parents=True, exist_ok=True)
 
-    tmux_session = f"{user.username}-research-{slug}"
-
-    # Create tmux session and start claude (skip permission prompts)
-    tmux.create_session(tmux_session, str(workspace))
-    tmux.send_keys(tmux_session, "claude --dangerously-skip-permissions")
+    # Write agent identity to CLAUDE.md
+    claude_md = workspace / "CLAUDE.md"
+    identity = agent.identity or "You are a research assistant."
+    claude_md.write_text(identity, encoding="utf-8")
 
     research = ResearchSession(
         user_id=user.id,
         agent_id=agent_id,
         name=body.name,
         slug=slug,
-        status="active",
-        tmux_session=tmux_session,
+        status="idle",
+        tmux_session="",
         workspace_path=str(workspace),
     )
     db.add(research)
@@ -178,10 +227,6 @@ async def get_research_session(
     user: User = Depends(get_current_user),
 ):
     return _get_session_or_404(session_id, user, db)
-
-
-class UpdateResearchRequest(BaseModel):
-    name: str
 
 
 @router.put(
@@ -210,9 +255,11 @@ async def delete_research_session(
 ):
     research = _get_session_or_404(session_id, user, db)
 
-    # Kill tmux session if it exists
-    if research.tmux_session:
-        tmux.kill_session(research.tmux_session)
+    # Cancel running task if exists
+    task = _running_tasks.get(research.id)
+    if task and not task.done():
+        task.cancel()
+        _running_tasks.pop(research.id, None)
 
     # Cleanup workspace
     workspace = Path(research.workspace_path)
@@ -247,7 +294,17 @@ async def send_message(
 ):
     research = _get_session_or_404(session_id, user, db)
 
-    # Store message in chat_messages
+    # Check if already has messages (for continuation flag)
+    existing_count = len(
+        db.exec(
+            select(ChatMessage).where(
+                ChatMessage.session_type == "research",
+                ChatMessage.session_id == research.id,
+            )
+        ).all()
+    )
+
+    # Store user message
     message = ChatMessage(
         user_id=user.id,
         session_type="research",
@@ -256,41 +313,51 @@ async def send_message(
         content=body.content,
     )
     db.add(message)
+
+    # Update status to thinking
+    research.status = "thinking"
+    research.updated_at = datetime.utcnow()
+    db.add(research)
     db.commit()
     db.refresh(message)
 
-    # Send to Claude Code via tmux
-    tmux.send_keys(research.tmux_session, body.content)
+    # Launch background task
+    task = asyncio.create_task(
+        _process_claude_response(
+            session_id=research.id,
+            user_id=user.id,
+            workspace_path=research.workspace_path,
+            user_message=body.content,
+            is_continuation=existing_count > 0,
+        )
+    )
+    _running_tasks[research.id] = task
 
     return {
         "id": message.id,
         "content": body.content,
-        "status": "sent",
+        "status": "thinking",
     }
 
 
 @router.post(
-    "/research/{session_id}/resume",
+    "/research/{session_id}/cancel",
     response_model=ResearchSessionResponse,
 )
-async def resume_research_session(
+async def cancel_research(
     session_id: int,
     db: Session = Depends(get_session),
     user: User = Depends(get_current_user),
 ):
     research = _get_session_or_404(session_id, user, db)
 
-    if not tmux.session_exists(research.tmux_session):
-        # Create new tmux session and resume claude
-        workspace = Path(research.workspace_path)
-        workspace.mkdir(parents=True, exist_ok=True)
-        tmux.create_session(research.tmux_session, str(workspace))
-        tmux.send_keys(
-            research.tmux_session,
-            "claude --dangerously-skip-permissions --resume",
-        )
+    # Cancel running task if exists
+    task = _running_tasks.get(research.id)
+    if task and not task.done():
+        task.cancel()
+        _running_tasks.pop(research.id, None)
 
-    research.status = "active"
+    research.status = "idle"
     research.updated_at = datetime.utcnow()
     db.add(research)
     db.commit()
@@ -298,26 +365,7 @@ async def resume_research_session(
     return research
 
 
-@router.post(
-    "/research/{session_id}/stop",
-    response_model=ResearchSessionResponse,
-)
-async def stop_research_session(
-    session_id: int,
-    db: Session = Depends(get_session),
-    user: User = Depends(get_current_user),
-):
-    research = _get_session_or_404(session_id, user, db)
-
-    if research.tmux_session:
-        tmux.kill_session(research.tmux_session)
-
-    research.status = "stopped"
-    research.updated_at = datetime.utcnow()
-    db.add(research)
-    db.commit()
-    db.refresh(research)
-    return research
+# --- Read endpoints ---
 
 
 @router.get(
@@ -393,31 +441,3 @@ async def get_research_file_content(
 
     content = target.read_text(encoding="utf-8")
     return FileContent(name=target.name, path=path, content=content)
-
-
-# --- WebSocket ---
-
-
-@router.websocket("/ws/research/{session_id}/terminal")
-async def research_terminal(websocket: WebSocket, session_id: int):
-    """Stream tmux pane content for research session terminal."""
-    await websocket.accept()
-
-    with Session(engine) as db:
-        research = db.get(ResearchSession, session_id)
-        if not research:
-            await websocket.close(code=4004)
-            return
-        tmux_session = research.tmux_session
-
-    try:
-        last_output = ""
-        while True:
-            if tmux.session_exists(tmux_session):
-                output = tmux.capture_pane(tmux_session)
-                if output != last_output:
-                    await websocket.send_text(output)
-                    last_output = output
-            await asyncio.sleep(0.5)
-    except WebSocketDisconnect:
-        pass
