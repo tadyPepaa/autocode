@@ -55,6 +55,12 @@ class ResearchSessionResponse(BaseModel):
     updated_at: datetime
 
 
+class SendMessageResponse(BaseModel):
+    id: int
+    content: str
+    status: str
+
+
 # --- Helpers ---
 
 
@@ -185,6 +191,7 @@ async def delete_research_session(
 
 @router.post(
     "/research/{session_id}/message",
+    response_model=SendMessageResponse,
     status_code=201,
 )
 async def send_message(
