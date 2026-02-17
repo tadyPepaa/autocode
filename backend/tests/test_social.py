@@ -903,7 +903,7 @@ class TestAIChat:
         mock_client = AsyncMock()
         mock_client.chat.completions.create = AsyncMock(return_value=mock_response)
 
-        with patch("app.api.social.get_openai_client", return_value=mock_client):
+        with patch("app.api.social.get_chatgpt_client", new_callable=AsyncMock, return_value=mock_client):
             resp = client.post(
                 "/api/social/ai/chat",
                 json={"message": "Write a caption for my sunset photo"},

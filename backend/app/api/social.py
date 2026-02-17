@@ -16,7 +16,7 @@ from app.database import get_session
 from app.models.agent import Agent
 from app.models.social import SocialAccount
 from app.models.user import User
-from app.services.openai_client import get_openai_client
+from app.services.openai_client import get_chatgpt_client
 from app.services.social_media import FacebookService, InstagramService
 
 router = APIRouter(prefix="/social", tags=["social"])
@@ -566,7 +566,7 @@ async def ai_chat(
 ):
     """AI content assistant for social media — generates posts, captions, hashtags."""
     try:
-        client = get_openai_client(user.id, db)
+        client = await get_chatgpt_client()
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
 

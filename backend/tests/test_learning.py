@@ -31,7 +31,7 @@ def mock_openai():
     mock_client.chat.completions.create = AsyncMock(return_value=mock_response)
 
     with patch(
-        "app.api.learning.get_openai_client", return_value=mock_client
+        "app.api.learning.get_chatgpt_client", return_value=mock_client
     ):
         yield mock_client
 
