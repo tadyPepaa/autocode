@@ -893,19 +893,26 @@ class TestReplyToDM:
 
 
 class TestAIChat:
-    def test_ai_chat_returns_placeholder(
+    def test_ai_chat_returns_response(
         self, client: TestClient, user_token: str
     ):
-        resp = client.post(
-            "/api/social/ai/chat",
-            json={"message": "Write a caption for my sunset photo"},
-            headers=_auth(user_token),
-        )
+        mock_response = MagicMock()
+        mock_response.choices = [MagicMock()]
+        mock_response.choices[0].message.content = "Great sunset photo! Try: 'Golden hour vibes #sunset'"
+
+        mock_client = AsyncMock()
+        mock_client.chat.completions.create = AsyncMock(return_value=mock_response)
+
+        with patch("app.api.social.get_openai_client", return_value=mock_client):
+            resp = client.post(
+                "/api/social/ai/chat",
+                json={"message": "Write a caption for my sunset photo"},
+                headers=_auth(user_token),
+            )
         assert resp.status_code == 200
         data = resp.json()
         assert "reply" in data
-        assert "social media AI assistant" in data["reply"]
-        assert "coming soon" in data["reply"].lower()
+        assert "sunset" in data["reply"].lower()
 
     def test_ai_chat_requires_auth(self, client: TestClient):
         resp = client.post(

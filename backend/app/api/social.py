@@ -16,6 +16,7 @@ from app.database import get_session
 from app.models.agent import Agent
 from app.models.social import SocialAccount
 from app.models.user import User
+from app.services.openai_client import get_openai_client
 from app.services.social_media import FacebookService, InstagramService
 
 router = APIRouter(prefix="/social", tags=["social"])
@@ -560,9 +561,28 @@ async def reply_to_dm(
 @router.post("/ai/chat", response_model=AIChatResponse)
 async def ai_chat(
     body: AIChatRequest,
+    db: Session = Depends(get_session),
     user: User = Depends(get_current_user),
 ):
-    """AI content assistant (stub - returns placeholder)."""
-    return AIChatResponse(
-        reply="I'm your social media AI assistant. LLM integration coming soon."
+    """AI content assistant for social media — generates posts, captions, hashtags."""
+    try:
+        client = get_openai_client(user.id, db)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    response = await client.chat.completions.create(
+        model="gpt-4o",
+        messages=[
+            {
+                "role": "system",
+                "content": (
+                    "You are a social media content assistant. "
+                    "Help create engaging posts, captions, and hashtags "
+                    "for Instagram and Facebook. Be creative and concise."
+                ),
+            },
+            {"role": "user", "content": body.message},
+        ],
     )
+    reply = response.choices[0].message.content or ""
+    return AIChatResponse(reply=reply)

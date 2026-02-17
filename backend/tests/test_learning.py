@@ -1,4 +1,5 @@
 from pathlib import Path
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from fastapi.testclient import TestClient
@@ -6,7 +7,7 @@ from sqlmodel import Session, select
 
 from app.config import settings
 from app.models.agent import Agent
-from app.models.common import ChatMessage
+from app.models.common import ApiKey, ChatMessage
 from app.models.learning import LearningCourse, LearningSubject
 
 
@@ -17,6 +18,22 @@ def data_dir(tmp_path):
     settings.data_dir = str(tmp_path)
     yield tmp_path
     settings.data_dir = original
+
+
+@pytest.fixture(autouse=True)
+def mock_openai():
+    """Mock OpenAI client for all learning tests."""
+    mock_response = MagicMock()
+    mock_response.choices = [MagicMock()]
+    mock_response.choices[0].message.content = "This is an AI tutor response."
+
+    mock_client = AsyncMock()
+    mock_client.chat.completions.create = AsyncMock(return_value=mock_response)
+
+    with patch(
+        "app.api.learning.get_openai_client", return_value=mock_client
+    ):
+        yield mock_client
 
 
 @pytest.fixture
@@ -567,7 +584,7 @@ class TestSendMessage:
         assert resp.status_code == 201
         data = resp.json()
         assert "message" in data
-        assert data["message"] == "I'm your AI tutor. LLM integration coming soon."
+        assert data["message"] == "This is an AI tutor response."
 
     def test_send_message_stores_both_roles(
         self,
@@ -603,7 +620,7 @@ class TestSendMessage:
         assert messages[0].role == "user"
         assert messages[0].content == "Test message"
         assert messages[1].role == "assistant"
-        assert messages[1].content == "I'm your AI tutor. LLM integration coming soon."
+        assert messages[1].content == "This is an AI tutor response."
 
     def test_send_message_not_found(
         self, client: TestClient, user_token: str

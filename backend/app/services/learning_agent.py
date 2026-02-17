@@ -1,10 +1,8 @@
-"""Learning agent service — stub for AI tutor functionality.
-
-Provides a clean interface for LLM integration. Currently returns
-placeholder responses; actual LLM calls will be plugged in later.
-"""
+"""Learning agent service — AI tutor using OpenAI."""
 
 from pathlib import Path
+
+from openai import AsyncOpenAI
 
 
 class LearningAgentService:
@@ -12,32 +10,37 @@ class LearningAgentService:
 
     async def get_response(
         self,
+        client: AsyncOpenAI,
         system_prompt: str,
         messages: list[dict[str, str]],
         new_message: str,
+        model: str = "gpt-4o",
     ) -> str:
-        """Generate a tutor response for the given message.
+        """Generate a tutor response using OpenAI.
 
         Args:
+            client: AsyncOpenAI client with user's API key.
             system_prompt: Combined agent identity + course instructions + notes.
             messages: Chat history as list of {"role": ..., "content": ...}.
             new_message: The new user message to respond to.
+            model: OpenAI model to use.
 
         Returns:
             AI tutor response string.
         """
-        # Stub: will be replaced with actual LLM call
-        return "I'm your AI tutor. LLM integration coming soon."
+        api_messages = [{"role": "system", "content": system_prompt}]
+        for msg in messages:
+            api_messages.append({"role": msg["role"], "content": msg["content"]})
+        api_messages.append({"role": "user", "content": new_message})
+
+        response = await client.chat.completions.create(
+            model=model,
+            messages=api_messages,
+        )
+        return response.choices[0].message.content or ""
 
     def read_student_notes(self, notes_path: str) -> str:
-        """Read student notes from the course workspace.
-
-        Args:
-            notes_path: Absolute path to student_notes.md file.
-
-        Returns:
-            Contents of the notes file, or empty string if not found.
-        """
+        """Read student notes from the course workspace."""
         path = Path(notes_path)
         if path.exists():
             return path.read_text(encoding="utf-8")
@@ -49,16 +52,7 @@ class LearningAgentService:
         course_instructions: str,
         student_notes: str,
     ) -> str:
-        """Build the system prompt from agent identity, course instructions, and notes.
-
-        Args:
-            agent_identity: The agent's identity/persona description.
-            course_instructions: Course-specific instructions.
-            student_notes: Current student notes content.
-
-        Returns:
-            Combined system prompt string.
-        """
+        """Build the system prompt from agent identity, course instructions, and notes."""
         parts = []
         if agent_identity:
             parts.append(f"## Identity\n{agent_identity}")
