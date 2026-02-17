@@ -1,14 +1,18 @@
-"""OpenAI client using ChatGPT subscription tokens from Codex CLI auth."""
+"""ChatGPT subscription client using Codex CLI OAuth tokens.
+
+Uses the ChatGPT backend Responses API (streaming) instead of the
+standard OpenAI API, as subscription tokens don't have API access.
+"""
 
 import json
 from pathlib import Path
 
 import httpx
-from openai import AsyncOpenAI
 
 CODEX_AUTH_PATH = Path.home() / ".codex" / "auth.json"
 CLIENT_ID = "app_EMoamEEZ73f0CkXaXp7hrann"
 REFRESH_URL = "https://auth.openai.com/oauth/token"
+RESPONSES_URL = "https://chatgpt.com/backend-api/codex/responses"
 
 
 def _read_auth() -> dict:
@@ -42,12 +46,8 @@ async def _refresh_tokens(refresh_token: str) -> dict:
         return resp.json()
 
 
-async def get_chatgpt_client() -> AsyncOpenAI:
-    """Create an AsyncOpenAI client using ChatGPT subscription tokens.
-
-    Reads tokens from ~/.codex/auth.json (shared with Codex CLI).
-    Refreshes the access token if needed.
-    """
+async def _get_auth_headers() -> dict[str, str]:
+    """Get fresh auth headers for ChatGPT API."""
     auth = _read_auth()
     tokens = auth.get("tokens", {})
     access_token = tokens.get("access_token")
@@ -59,7 +59,6 @@ async def get_chatgpt_client() -> AsyncOpenAI:
             "No ChatGPT tokens found. Run 'codex' and login first."
         )
 
-    # Try to refresh token to ensure it's fresh
     try:
         refreshed = await _refresh_tokens(refresh_token)
         if refreshed.get("access_token"):
@@ -72,14 +71,68 @@ async def get_chatgpt_client() -> AsyncOpenAI:
         auth["tokens"] = tokens
         _write_auth(auth)
     except httpx.HTTPStatusError:
-        # Use existing token, it might still be valid
         pass
 
-    # Create client with ChatGPT subscription token
-    client = AsyncOpenAI(
-        api_key=access_token,
-        default_headers={
-            "chatgpt-account-id": account_id or "",
-        },
-    )
-    return client
+    return {
+        "Authorization": f"Bearer {access_token}",
+        "Content-Type": "application/json",
+        "chatgpt-account-id": account_id or "",
+    }
+
+
+async def chatgpt_response(
+    model: str,
+    instructions: str,
+    messages: list[dict[str, str]],
+) -> str:
+    """Send a request to ChatGPT Responses API and return the text.
+
+    Args:
+        model: Model ID (e.g. "gpt-5.3-codex", "gpt-5.2")
+        instructions: System prompt / instructions
+        messages: List of {"role": "user"|"assistant", "content": "..."}
+
+    Returns:
+        The assistant's response text.
+    """
+    headers = await _get_auth_headers()
+
+    async with httpx.AsyncClient() as client:
+        async with client.stream(
+            "POST",
+            RESPONSES_URL,
+            headers=headers,
+            json={
+                "model": model,
+                "instructions": instructions,
+                "input": messages,
+                "store": False,
+                "stream": True,
+            },
+            timeout=120.0,
+        ) as resp:
+            if resp.status_code != 200:
+                body = await resp.aread()
+                raise ValueError(
+                    f"ChatGPT API error ({resp.status_code}): {body.decode()[:200]}"
+                )
+
+            collected_text = ""
+            async for line in resp.aiter_lines():
+                if not line.startswith("data: "):
+                    continue
+                data_str = line[6:]
+                if data_str == "[DONE]":
+                    break
+                try:
+                    event = json.loads(data_str)
+                    if event.get("type") == "response.output_text.delta":
+                        collected_text += event.get("delta", "")
+                    if event.get("type") == "error":
+                        raise ValueError(
+                            f"ChatGPT stream error: {event.get('message', 'unknown')}"
+                        )
+                except json.JSONDecodeError:
+                    continue
+
+    return collected_text

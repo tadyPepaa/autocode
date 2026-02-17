@@ -1,18 +1,20 @@
 AVAILABLE_MODELS = [
+    {"id": "gpt-5.3-codex", "name": "GPT-5.3 Codex", "category": "coding"},
     {"id": "gpt-5.2-codex", "name": "GPT-5.2 Codex", "category": "coding"},
     {"id": "gpt-5.2", "name": "GPT-5.2", "category": "general"},
     {"id": "gpt-5.1-codex-max", "name": "GPT-5.1 Codex Max", "category": "coding"},
     {"id": "gpt-5.1-codex", "name": "GPT-5.1 Codex", "category": "coding"},
     {"id": "gpt-5.1-codex-mini", "name": "GPT-5.1 Codex Mini", "category": "coding"},
     {"id": "gpt-5.1", "name": "GPT-5.1", "category": "general"},
-    {"id": "codex-mini-latest", "name": "Codex Mini", "category": "coding"},
+    {"id": "gpt-5", "name": "GPT-5", "category": "general"},
+    {"id": "gpt-5-codex", "name": "GPT-5 Codex", "category": "coding"},
 ]
 
 TEMPLATES = {
     "coding": {
         "type": "coding",
         "name": "Coding Agent",
-        "model": "gpt-5.2-codex",
+        "model": "gpt-5.3-codex",
         "identity": (
             "You are a coding agent. Your job is to manage Claude Code via tmux "
             "and implement projects autonomously. Always:\n"

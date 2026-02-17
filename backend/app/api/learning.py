@@ -15,7 +15,6 @@ from app.models.common import ChatMessage
 from app.models.learning import LearningCourse, LearningSubject
 from app.models.user import User
 from app.services.learning_agent import learning_agent
-from app.services.openai_client import get_chatgpt_client
 
 router = APIRouter(tags=["learning"])
 
@@ -363,17 +362,16 @@ async def send_message(
     )
 
     # Get AI response via ChatGPT subscription
+    agent_model = agent.model if agent else "gpt-5.2"
     try:
-        client = await get_chatgpt_client()
+        ai_response = await learning_agent.get_response(
+            model=agent_model,
+            system_prompt=system_prompt,
+            messages=history,
+            new_message=body.content,
+        )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
-
-    ai_response = await learning_agent.get_response(
-        client=client,
-        system_prompt=system_prompt,
-        messages=history,
-        new_message=body.content,
-    )
 
     # Store user message
     user_msg = ChatMessage(

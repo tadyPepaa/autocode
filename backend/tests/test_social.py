@@ -896,14 +896,11 @@ class TestAIChat:
     def test_ai_chat_returns_response(
         self, client: TestClient, user_token: str
     ):
-        mock_response = MagicMock()
-        mock_response.choices = [MagicMock()]
-        mock_response.choices[0].message.content = "Great sunset photo! Try: 'Golden hour vibes #sunset'"
-
-        mock_client = AsyncMock()
-        mock_client.chat.completions.create = AsyncMock(return_value=mock_response)
-
-        with patch("app.api.social.get_chatgpt_client", new_callable=AsyncMock, return_value=mock_client):
+        with patch(
+            "app.api.social.chatgpt_response",
+            new_callable=AsyncMock,
+            return_value="Great sunset photo! Try: 'Golden hour vibes #sunset'",
+        ):
             resp = client.post(
                 "/api/social/ai/chat",
                 json={"message": "Write a caption for my sunset photo"},

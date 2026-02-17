@@ -1,8 +1,8 @@
-"""Learning agent service — AI tutor using OpenAI."""
+"""Learning agent service — AI tutor using ChatGPT subscription."""
 
 from pathlib import Path
 
-from openai import AsyncOpenAI
+from app.services.openai_client import chatgpt_response
 
 
 class LearningAgentService:
@@ -10,34 +10,30 @@ class LearningAgentService:
 
     async def get_response(
         self,
-        client: AsyncOpenAI,
+        model: str,
         system_prompt: str,
         messages: list[dict[str, str]],
         new_message: str,
-        model: str = "gpt-4o",
     ) -> str:
-        """Generate a tutor response using OpenAI.
+        """Generate a tutor response using ChatGPT Responses API.
 
         Args:
-            client: AsyncOpenAI client with user's API key.
+            model: ChatGPT model ID (e.g. "gpt-5.2").
             system_prompt: Combined agent identity + course instructions + notes.
             messages: Chat history as list of {"role": ..., "content": ...}.
             new_message: The new user message to respond to.
-            model: OpenAI model to use.
 
         Returns:
             AI tutor response string.
         """
-        api_messages = [{"role": "system", "content": system_prompt}]
-        for msg in messages:
-            api_messages.append({"role": msg["role"], "content": msg["content"]})
-        api_messages.append({"role": "user", "content": new_message})
+        input_messages = list(messages)
+        input_messages.append({"role": "user", "content": new_message})
 
-        response = await client.chat.completions.create(
+        return await chatgpt_response(
             model=model,
-            messages=api_messages,
+            instructions=system_prompt,
+            messages=input_messages,
         )
-        return response.choices[0].message.content or ""
 
     def read_student_notes(self, notes_path: str) -> str:
         """Read student notes from the course workspace."""

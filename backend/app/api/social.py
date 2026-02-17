@@ -16,7 +16,7 @@ from app.database import get_session
 from app.models.agent import Agent
 from app.models.social import SocialAccount
 from app.models.user import User
-from app.services.openai_client import get_chatgpt_client
+from app.services.openai_client import chatgpt_response
 from app.services.social_media import FacebookService, InstagramService
 
 router = APIRouter(prefix="/social", tags=["social"])
@@ -566,23 +566,16 @@ async def ai_chat(
 ):
     """AI content assistant for social media — generates posts, captions, hashtags."""
     try:
-        client = await get_chatgpt_client()
+        reply = await chatgpt_response(
+            model="gpt-5.2",
+            instructions=(
+                "You are a social media content assistant. "
+                "Help create engaging posts, captions, and hashtags "
+                "for Instagram and Facebook. Be creative and concise."
+            ),
+            messages=[{"role": "user", "content": body.message}],
+        )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
 
-    response = await client.chat.completions.create(
-        model="gpt-4o",
-        messages=[
-            {
-                "role": "system",
-                "content": (
-                    "You are a social media content assistant. "
-                    "Help create engaging posts, captions, and hashtags "
-                    "for Instagram and Facebook. Be creative and concise."
-                ),
-            },
-            {"role": "user", "content": body.message},
-        ],
-    )
-    reply = response.choices[0].message.content or ""
     return AIChatResponse(reply=reply)

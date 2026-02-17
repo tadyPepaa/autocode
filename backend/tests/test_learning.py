@@ -21,19 +21,14 @@ def data_dir(tmp_path):
 
 
 @pytest.fixture(autouse=True)
-def mock_openai():
-    """Mock OpenAI client for all learning tests."""
-    mock_response = MagicMock()
-    mock_response.choices = [MagicMock()]
-    mock_response.choices[0].message.content = "This is an AI tutor response."
-
-    mock_client = AsyncMock()
-    mock_client.chat.completions.create = AsyncMock(return_value=mock_response)
-
+def mock_chatgpt():
+    """Mock ChatGPT Responses API for all learning tests."""
     with patch(
-        "app.api.learning.get_chatgpt_client", return_value=mock_client
-    ):
-        yield mock_client
+        "app.services.learning_agent.chatgpt_response",
+        new_callable=AsyncMock,
+        return_value="This is an AI tutor response.",
+    ) as mock:
+        yield mock
 
 
 @pytest.fixture

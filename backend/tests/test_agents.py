@@ -12,7 +12,7 @@ def test_create_agent_from_template(client: TestClient, user_token: str):
     data = response.json()
     assert data["name"] == "My Coding Agent"
     assert data["type"] == "coding"
-    assert data["model"] == "gpt-5.2-codex"
+    assert data["model"] == "gpt-5.3-codex"
     assert "coding agent" in data["identity"].lower()
     assert data["user_id"] is not None
 
@@ -165,7 +165,7 @@ def test_get_templates(client: TestClient, user_token: str):
     assert "research" in data
     assert "learning" in data
     assert "social_media" in data
-    assert data["coding"]["model"] == "gpt-5.2-codex"
+    assert data["coding"]["model"] == "gpt-5.3-codex"
 
 
 def test_get_available_models(client: TestClient, user_token: str):
