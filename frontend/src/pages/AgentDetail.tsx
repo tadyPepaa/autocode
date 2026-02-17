@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
-import { useAgent, useUpdateAgent } from '../api/agents';
+import { useAgent, useUpdateAgent, useAvailableModels } from '../api/agents';
 import { useProjects, useCreateProject, type Project } from '../api/projects';
 import {
   useResearchSessions,
@@ -44,14 +44,9 @@ function StatusBadge({ status }: { status: string }) {
 }
 
 function CodingAgentView({ agentId }: { agentId: number }) {
-  const { data: agent } = useAgent(agentId);
-  const updateAgent = useUpdateAgent();
   const { data: projects, isLoading: projectsLoading } = useProjects(agentId);
   const createProject = useCreateProject(agentId);
   const navigate = useNavigate();
-
-  const [globalRules, setGlobalRules] = useState<string | null>(null);
-  const [rulesSaved, setRulesSaved] = useState(false);
 
   const [showModal, setShowModal] = useState(false);
   const [newProject, setNewProject] = useState({
@@ -60,22 +55,6 @@ function CodingAgentView({ agentId }: { agentId: number }) {
     architecture: '',
   });
   const [createError, setCreateError] = useState('');
-
-  // Initialize globalRules from agent data once loaded
-  const currentRules = globalRules ?? agent?.global_rules ?? '';
-
-  function handleSaveRules() {
-    if (!agent) return;
-    updateAgent.mutate(
-      { id: agent.id, global_rules: currentRules },
-      {
-        onSuccess: () => {
-          setRulesSaved(true);
-          setTimeout(() => setRulesSaved(false), 2000);
-        },
-      },
-    );
-  }
 
   async function handleCreateProject(e: React.FormEvent) {
     e.preventDefault();
@@ -100,35 +79,6 @@ function CodingAgentView({ agentId }: { agentId: number }) {
 
   return (
     <>
-      {/* Global Rules */}
-      <section className="mb-8">
-        <h2 className="mb-3 text-lg font-semibold text-gray-300">
-          Global Rules
-        </h2>
-        <textarea
-          value={currentRules}
-          onChange={(e) => {
-            setGlobalRules(e.target.value);
-            setRulesSaved(false);
-          }}
-          rows={6}
-          className="w-full rounded-lg border border-gray-600 bg-gray-800 px-4 py-2 text-sm text-white placeholder-gray-500 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
-          placeholder="Rules the agent must always follow..."
-        />
-        <div className="mt-2 flex items-center gap-3">
-          <button
-            onClick={handleSaveRules}
-            disabled={updateAgent.isPending}
-            className="rounded-lg bg-blue-600 px-4 py-1.5 text-sm font-medium text-white transition hover:bg-blue-500 disabled:opacity-50"
-          >
-            {updateAgent.isPending ? 'Saving...' : 'Save Rules'}
-          </button>
-          {rulesSaved && (
-            <span className="text-sm text-green-400">Saved</span>
-          )}
-        </div>
-      </section>
-
       {/* Projects */}
       <section>
         <div className="mb-4 flex items-center justify-between">
@@ -892,9 +842,142 @@ function SocialMediaAgentView({ agentId }: { agentId: number }) {
   );
 }
 
-const agentTypeRoutes: Record<string, (id: number) => string> = {};
+const typeIcons: Record<string, string> = {
+  coding: '\u{1F4BB}',
+  research: '\u{1F52C}',
+  learning: '\u{1F393}',
+  social_media: '\u{1F4F1}',
+  custom: '\u{2699}\uFE0F',
+};
 
-const agentTypeLabels: Record<string, string> = {};
+function AgentSettings({ agentId }: { agentId: number }) {
+  const { data: agent } = useAgent(agentId);
+  const { data: models } = useAvailableModels();
+  const updateAgent = useUpdateAgent();
+
+  const [name, setName] = useState<string | null>(null);
+  const [model, setModel] = useState<string | null>(null);
+  const [identity, setIdentity] = useState<string | null>(null);
+  const [globalRules, setGlobalRules] = useState<string | null>(null);
+  const [saved, setSaved] = useState(false);
+  const [open, setOpen] = useState(false);
+
+  if (!agent) return null;
+
+  const currentName = name ?? agent.name;
+  const currentModel = model ?? agent.model;
+  const currentIdentity = identity ?? agent.identity;
+  const currentRules = globalRules ?? agent.global_rules;
+
+  function handleSave() {
+    if (!agent) return;
+    updateAgent.mutate(
+      {
+        id: agent.id,
+        name: currentName,
+        model: currentModel,
+        identity: currentIdentity,
+        global_rules: currentRules,
+      },
+      {
+        onSuccess: () => {
+          setSaved(true);
+          setTimeout(() => setSaved(false), 2000);
+        },
+      },
+    );
+  }
+
+  return (
+    <div className="mb-6 rounded-lg border border-gray-700 bg-gray-800/50">
+      <button
+        onClick={() => setOpen(!open)}
+        className="flex w-full items-center justify-between px-4 py-3 text-left"
+      >
+        <span className="text-sm font-semibold text-gray-300">Agent Settings</span>
+        <span
+          className="text-gray-400 transition-transform"
+          style={{
+            display: 'inline-block',
+            transform: open ? 'rotate(180deg)' : 'rotate(0deg)',
+          }}
+        >
+          &#9660;
+        </span>
+      </button>
+
+      {open && (
+        <div className="border-t border-gray-700 px-4 py-4 space-y-4">
+          <div>
+            <label className="mb-1 block text-sm font-medium text-gray-400">Name</label>
+            <input
+              type="text"
+              value={currentName}
+              onChange={(e) => { setName(e.target.value); setSaved(false); }}
+              className="w-full rounded-lg border border-gray-600 bg-gray-900 px-3 py-2 text-sm text-white placeholder-gray-500 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+            />
+          </div>
+
+          <div>
+            <label className="mb-1 block text-sm font-medium text-gray-400">Model</label>
+            <select
+              value={currentModel}
+              onChange={(e) => { setModel(e.target.value); setSaved(false); }}
+              className="w-full rounded-lg border border-gray-600 bg-gray-900 px-3 py-2 text-sm text-white focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+            >
+              {models?.map((m) => (
+                <option key={m.id} value={m.id}>
+                  {m.name} ({m.id})
+                </option>
+              ))}
+              {/* Show current model if not in list */}
+              {models && !models.find((m) => m.id === currentModel) && (
+                <option value={currentModel}>{currentModel}</option>
+              )}
+            </select>
+          </div>
+
+          <div>
+            <label className="mb-1 block text-sm font-medium text-gray-400">
+              Identity / Behavior
+            </label>
+            <textarea
+              value={currentIdentity}
+              onChange={(e) => { setIdentity(e.target.value); setSaved(false); }}
+              rows={4}
+              className="w-full rounded-lg border border-gray-600 bg-gray-900 px-3 py-2 text-sm text-white placeholder-gray-500 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+              placeholder="Agent persona and behavior instructions..."
+            />
+          </div>
+
+          <div>
+            <label className="mb-1 block text-sm font-medium text-gray-400">
+              Global Rules
+            </label>
+            <textarea
+              value={currentRules}
+              onChange={(e) => { setGlobalRules(e.target.value); setSaved(false); }}
+              rows={3}
+              className="w-full rounded-lg border border-gray-600 bg-gray-900 px-3 py-2 text-sm text-white placeholder-gray-500 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+              placeholder="Rules the agent must always follow..."
+            />
+          </div>
+
+          <div className="flex items-center gap-3">
+            <button
+              onClick={handleSave}
+              disabled={updateAgent.isPending}
+              className="rounded-lg bg-blue-600 px-4 py-1.5 text-sm font-medium text-white transition hover:bg-blue-500 disabled:opacity-50"
+            >
+              {updateAgent.isPending ? 'Saving...' : 'Save Settings'}
+            </button>
+            {saved && <span className="text-sm text-green-400">Saved</span>}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
 
 export default function AgentDetail() {
   const { id } = useParams<{ id: string }>();
@@ -922,11 +1005,17 @@ export default function AgentDetail() {
     <div className="p-6">
       {/* Header */}
       <div className="mb-6">
-        <h1 className="text-2xl font-bold text-white">{agent.name}</h1>
+        <h1 className="text-2xl font-bold text-white">
+          <span className="mr-2">{typeIcons[agent.type] || typeIcons.custom}</span>
+          {agent.name}
+        </h1>
         <p className="mt-1 text-sm text-gray-400">
           {agent.type} &middot; {agent.model}
         </p>
       </div>
+
+      {/* Settings panel */}
+      <AgentSettings agentId={agentId} />
 
       {/* Render based on agent type */}
       {agent.type === 'coding' ? (
@@ -937,18 +1026,6 @@ export default function AgentDetail() {
         <LearningAgentView agentId={agentId} />
       ) : agent.type === 'social_media' ? (
         <SocialMediaAgentView agentId={agentId} />
-      ) : agentTypeRoutes[agent.type] ? (
-        <div className="rounded-lg bg-gray-800 p-8 text-center">
-          <p className="mb-4 text-gray-400">
-            This is a {agentTypeLabels[agent.type]} agent.
-          </p>
-          <Link
-            to={agentTypeRoutes[agent.type](agentId)}
-            className="inline-block rounded-lg bg-blue-600 px-5 py-2 text-white transition hover:bg-blue-500"
-          >
-            Go to {agentTypeLabels[agent.type]}
-          </Link>
-        </div>
       ) : (
         <div className="rounded-lg bg-gray-800 p-8 text-center">
           <p className="text-gray-400">

@@ -12,7 +12,7 @@ def test_create_agent_from_template(client: TestClient, user_token: str):
     data = response.json()
     assert data["name"] == "My Coding Agent"
     assert data["type"] == "coding"
-    assert data["model"] == "openai/gpt-5.3-codex"
+    assert data["model"] == "gpt-5.2-codex"
     assert "coding agent" in data["identity"].lower()
     assert data["user_id"] is not None
 
@@ -165,7 +165,51 @@ def test_get_templates(client: TestClient, user_token: str):
     assert "research" in data
     assert "learning" in data
     assert "social_media" in data
-    assert data["coding"]["model"] == "openai/gpt-5.3-codex"
+    assert data["coding"]["model"] == "gpt-5.2-codex"
+
+
+def test_get_available_models(client: TestClient, user_token: str):
+    response = client.get(
+        "/api/agents/models",
+        headers={"Authorization": f"Bearer {user_token}"},
+    )
+    assert response.status_code == 200
+    data = response.json()
+    assert len(data) > 0
+    assert all("id" in m and "name" in m and "category" in m for m in data)
+    model_ids = [m["id"] for m in data]
+    assert "gpt-5.2-codex" in model_ids
+    assert "gpt-5.2" in model_ids
+
+
+def test_init_default_agents(client: TestClient, user_token: str):
+    # First call creates all 4 default agents
+    response = client.post(
+        "/api/agents/init",
+        headers={"Authorization": f"Bearer {user_token}"},
+    )
+    assert response.status_code == 200
+    data = response.json()
+    assert set(data["created"]) == {"coding", "research", "learning", "social_media"}
+
+    # Second call creates nothing (idempotent)
+    response = client.post(
+        "/api/agents/init",
+        headers={"Authorization": f"Bearer {user_token}"},
+    )
+    assert response.status_code == 200
+    assert response.json()["created"] == []
+
+    # Verify agents exist
+    response = client.get(
+        "/api/agents",
+        headers={"Authorization": f"Bearer {user_token}"},
+    )
+    types = {a["type"] for a in response.json()}
+    assert "coding" in types
+    assert "research" in types
+    assert "learning" in types
+    assert "social_media" in types
 
 
 def test_cannot_access_other_users_agent(

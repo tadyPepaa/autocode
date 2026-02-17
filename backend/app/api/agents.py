@@ -8,7 +8,12 @@ from app.api.deps import get_current_user
 from app.database import get_session
 from app.models.agent import Agent
 from app.models.user import User
-from app.services.agent_templates import TEMPLATES, get_template, list_templates
+from app.services.agent_templates import (
+    AVAILABLE_MODELS,
+    TEMPLATES,
+    get_template,
+    list_templates,
+)
 
 router = APIRouter(prefix="/agents", tags=["agents"])
 
@@ -49,6 +54,45 @@ class AgentResponse(BaseModel):
 @router.get("/templates")
 async def get_templates():
     return {name: TEMPLATES[name] for name in list_templates()}
+
+
+@router.get("/models")
+async def get_available_models():
+    return AVAILABLE_MODELS
+
+
+@router.post("/init")
+async def init_default_agents(
+    session: Session = Depends(get_session),
+    user: User = Depends(get_current_user),
+):
+    """Create default agents for user if they don't exist yet."""
+    existing = session.exec(
+        select(Agent).where(Agent.user_id == user.id)
+    ).all()
+    existing_types = {a.type for a in existing}
+
+    created = []
+    for template_key in list_templates():
+        tmpl = TEMPLATES[template_key]
+        if tmpl["type"] in existing_types:
+            continue
+        agent = Agent(
+            user_id=user.id,
+            name=tmpl["name"],
+            type=tmpl["type"],
+            model=tmpl["model"],
+            identity=tmpl["identity"],
+            tools=tmpl["tools"],
+            global_rules=tmpl["global_rules"],
+        )
+        session.add(agent)
+        created.append(tmpl["type"])
+
+    if created:
+        session.commit()
+
+    return {"created": created}
 
 
 @router.get("", response_model=list[AgentResponse])

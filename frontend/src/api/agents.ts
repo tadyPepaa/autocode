@@ -52,3 +52,28 @@ export function useDeleteAgent() {
     onSuccess: () => qc.invalidateQueries({ queryKey: ['agents'] }),
   });
 }
+
+export interface AvailableModel {
+  id: string;
+  name: string;
+  category: string;
+}
+
+export function useAvailableModels() {
+  return useQuery<AvailableModel[]>({
+    queryKey: ['models'],
+    queryFn: () => api.get('/agents/models').then(r => r.data),
+  });
+}
+
+export function useInitAgents() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: () => api.post('/agents/init').then(r => r.data),
+    onSuccess: (data: { created: string[] }) => {
+      if (data.created.length > 0) {
+        qc.invalidateQueries({ queryKey: ['agents'] });
+      }
+    },
+  });
+}

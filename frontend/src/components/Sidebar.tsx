@@ -1,12 +1,15 @@
-import { useEffect, useState } from 'react';
+import { useEffect } from 'react';
 import { NavLink } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
-import api from '../api/client';
+import { useAgents, useInitAgents, type Agent } from '../api/agents';
 
-interface Agent {
-  id: number;
-  name: string;
-}
+const typeIcons: Record<string, string> = {
+  coding: '\u{1F4BB}',
+  research: '\u{1F52C}',
+  learning: '\u{1F393}',
+  social_media: '\u{1F4F1}',
+  custom: '\u{2699}\uFE0F',
+};
 
 const linkBase = 'block px-4 py-2 rounded-md text-sm transition-colors';
 const linkActive = 'bg-gray-700 text-white';
@@ -18,11 +21,12 @@ function navLinkClass({ isActive }: { isActive: boolean }) {
 
 export default function Sidebar() {
   const { user, logout } = useAuth();
-  const [agents, setAgents] = useState<Agent[]>([]);
+  const { data: agents = [] } = useAgents();
+  const initAgents = useInitAgents();
 
   useEffect(() => {
-    api.get('/agents').then((res) => setAgents(res.data)).catch(() => {});
-  }, []);
+    initAgents.mutate();
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   return (
     <aside className="w-64 flex-shrink-0 bg-gray-800 border-r border-gray-700 flex flex-col h-full">
@@ -37,8 +41,13 @@ export default function Sidebar() {
 
         <div className="border-t border-gray-700 my-3" />
 
-        {agents.map((agent) => (
+        <p className="px-4 text-xs font-semibold uppercase tracking-wider text-gray-500 mb-2">
+          Agents
+        </p>
+
+        {agents.map((agent: Agent) => (
           <NavLink key={agent.id} to={`/agents/${agent.id}`} className={navLinkClass}>
+            <span className="mr-2">{typeIcons[agent.type] || typeIcons.custom}</span>
             {agent.name}
           </NavLink>
         ))}
