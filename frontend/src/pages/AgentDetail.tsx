@@ -247,26 +247,13 @@ function ResearchAgentView({ agentId }: { agentId: number }) {
   const deleteResearch = useDeleteResearch();
   const navigate = useNavigate();
 
-  const [showModal, setShowModal] = useState(false);
-  const [newName, setNewName] = useState('');
-  const [createError, setCreateError] = useState('');
-
-  async function handleCreate(e: React.FormEvent) {
-    e.preventDefault();
-    setCreateError('');
-    if (!newName.trim()) {
-      setCreateError('Name is required.');
-      return;
-    }
+  async function handleCreate() {
+    const name = `Research ${new Date().toLocaleDateString()} ${new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`;
     try {
-      const created = (await createResearch.mutateAsync({
-        name: newName.trim(),
-      })) as ResearchSession;
-      setShowModal(false);
-      setNewName('');
+      const created = (await createResearch.mutateAsync({ name })) as ResearchSession;
       navigate(`/research/${created.id}`);
     } catch {
-      setCreateError('Failed to create research session.');
+      // ignore
     }
   }
 
@@ -282,10 +269,11 @@ function ResearchAgentView({ agentId }: { agentId: number }) {
           Research Sessions
         </h2>
         <button
-          onClick={() => setShowModal(true)}
-          className="rounded-lg bg-blue-600 px-4 py-1.5 text-sm font-medium text-white transition hover:bg-blue-500"
+          onClick={handleCreate}
+          disabled={createResearch.isPending}
+          className="rounded-lg bg-blue-600 px-4 py-1.5 text-sm font-medium text-white transition hover:bg-blue-500 disabled:opacity-50"
         >
-          + New Research
+          {createResearch.isPending ? 'Creating...' : '+ New Research'}
         </button>
       </div>
 
@@ -353,56 +341,6 @@ function ResearchAgentView({ agentId }: { agentId: number }) {
         </div>
       )}
 
-      {/* Create Research Modal */}
-      {showModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60">
-          <div className="w-full max-w-lg rounded-xl bg-gray-800 p-6 shadow-xl">
-            <h3 className="mb-4 text-lg font-bold text-white">
-              New Research Session
-            </h3>
-
-            {createError && (
-              <div className="mb-3 rounded-lg bg-red-900/50 px-3 py-2 text-sm text-red-300">
-                {createError}
-              </div>
-            )}
-
-            <form onSubmit={handleCreate} className="space-y-4">
-              <div>
-                <label className="mb-1 block text-sm font-medium text-gray-300">
-                  Name <span className="text-red-400">*</span>
-                </label>
-                <input
-                  type="text"
-                  value={newName}
-                  onChange={(e) => setNewName(e.target.value)}
-                  placeholder="Research topic..."
-                  className="w-full rounded-lg border border-gray-600 bg-gray-900 px-4 py-2 text-white placeholder-gray-500 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
-                />
-              </div>
-              <div className="flex justify-end gap-3 pt-2">
-                <button
-                  type="button"
-                  onClick={() => {
-                    setShowModal(false);
-                    setCreateError('');
-                  }}
-                  className="rounded-lg border border-gray-600 px-4 py-2 text-sm text-gray-300 transition hover:bg-gray-700"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  disabled={createResearch.isPending}
-                  className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-blue-500 disabled:opacity-50"
-                >
-                  {createResearch.isPending ? 'Creating...' : 'Create'}
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
     </section>
   );
 }
