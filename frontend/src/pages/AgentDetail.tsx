@@ -8,6 +8,16 @@ import {
   useDeleteResearch,
   type ResearchSession,
 } from '../api/research';
+import {
+  useSubjects,
+  useCreateSubject,
+  useDeleteSubject,
+  useCourses,
+  useCreateCourse,
+  useDeleteCourse,
+  type Subject,
+  type Course,
+} from '../api/learning';
 
 const statusColors: Record<string, string> = {
   created: 'bg-gray-600',
@@ -441,15 +451,320 @@ function ResearchAgentView({ agentId }: { agentId: number }) {
   );
 }
 
+function SubjectCourses({ subject }: { subject: Subject }) {
+  const { data: courses, isLoading } = useCourses(subject.id);
+  const createCourse = useCreateCourse(subject.id);
+  const deleteCourse = useDeleteCourse();
+  const navigate = useNavigate();
+
+  const [showModal, setShowModal] = useState(false);
+  const [newCourse, setNewCourse] = useState({ name: '', instructions: '' });
+  const [createError, setCreateError] = useState('');
+
+  async function handleCreate(e: React.FormEvent) {
+    e.preventDefault();
+    setCreateError('');
+    if (!newCourse.name.trim()) {
+      setCreateError('Name is required.');
+      return;
+    }
+    try {
+      const created = (await createCourse.mutateAsync({
+        name: newCourse.name.trim(),
+        instructions: newCourse.instructions,
+      })) as Course;
+      setShowModal(false);
+      setNewCourse({ name: '', instructions: '' });
+      navigate(`/learning/course/${created.id}`);
+    } catch {
+      setCreateError('Failed to create course.');
+    }
+  }
+
+  function handleDelete(id: number) {
+    if (!confirm('Delete this course?')) return;
+    deleteCourse.mutate(id);
+  }
+
+  return (
+    <div className="mt-2 ml-4 space-y-2">
+      {isLoading && (
+        <div className="h-8 animate-pulse rounded bg-gray-700" />
+      )}
+
+      {!isLoading && courses && courses.length === 0 && (
+        <p className="text-sm text-gray-500">No courses yet.</p>
+      )}
+
+      {!isLoading && courses && courses.map((course) => (
+        <div
+          key={course.id}
+          className="flex items-center justify-between rounded-lg border border-gray-700 bg-gray-800/50 px-3 py-2"
+        >
+          <div className="min-w-0 flex-1">
+            <Link
+              to={`/learning/course/${course.id}`}
+              className="text-sm font-medium text-blue-400 hover:text-blue-300"
+            >
+              {course.name}
+            </Link>
+            {course.instructions && (
+              <p className="truncate text-xs text-gray-500">{course.instructions}</p>
+            )}
+          </div>
+          <div className="ml-3 flex items-center gap-2">
+            <Link
+              to={`/learning/course/${course.id}`}
+              className="rounded bg-gray-700 px-3 py-1 text-xs text-white transition hover:bg-gray-600"
+            >
+              Open
+            </Link>
+            <button
+              onClick={() => handleDelete(course.id)}
+              disabled={deleteCourse.isPending}
+              className="rounded bg-red-700 px-3 py-1 text-xs text-white transition hover:bg-red-600 disabled:opacity-50"
+            >
+              Delete
+            </button>
+          </div>
+        </div>
+      ))}
+
+      <button
+        onClick={() => setShowModal(true)}
+        className="rounded-lg border border-dashed border-gray-600 px-3 py-1.5 text-xs text-gray-400 transition hover:border-gray-500 hover:text-gray-300"
+      >
+        + New Course
+      </button>
+
+      {showModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60">
+          <div className="w-full max-w-lg rounded-xl bg-gray-800 p-6 shadow-xl">
+            <h3 className="mb-4 text-lg font-bold text-white">
+              New Course in &quot;{subject.name}&quot;
+            </h3>
+
+            {createError && (
+              <div className="mb-3 rounded-lg bg-red-900/50 px-3 py-2 text-sm text-red-300">
+                {createError}
+              </div>
+            )}
+
+            <form onSubmit={handleCreate} className="space-y-4">
+              <div>
+                <label className="mb-1 block text-sm font-medium text-gray-300">
+                  Name <span className="text-red-400">*</span>
+                </label>
+                <input
+                  type="text"
+                  value={newCourse.name}
+                  onChange={(e) => setNewCourse((c) => ({ ...c, name: e.target.value }))}
+                  placeholder="Course name..."
+                  className="w-full rounded-lg border border-gray-600 bg-gray-900 px-4 py-2 text-white placeholder-gray-500 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                />
+              </div>
+              <div>
+                <label className="mb-1 block text-sm font-medium text-gray-300">
+                  Instructions <span className="text-gray-500">(optional)</span>
+                </label>
+                <textarea
+                  value={newCourse.instructions}
+                  onChange={(e) => setNewCourse((c) => ({ ...c, instructions: e.target.value }))}
+                  rows={4}
+                  placeholder="What should the AI focus on? Any specific learning goals..."
+                  className="w-full rounded-lg border border-gray-600 bg-gray-900 px-4 py-2 text-white placeholder-gray-500 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                />
+              </div>
+              <div className="flex justify-end gap-3 pt-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowModal(false);
+                    setCreateError('');
+                  }}
+                  className="rounded-lg border border-gray-600 px-4 py-2 text-sm text-gray-300 transition hover:bg-gray-700"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={createCourse.isPending}
+                  className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-blue-500 disabled:opacity-50"
+                >
+                  {createCourse.isPending ? 'Creating...' : 'Create'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function LearningAgentView({ agentId }: { agentId: number }) {
+  const { data: subjects, isLoading } = useSubjects(agentId);
+  const createSubject = useCreateSubject(agentId);
+  const deleteSubject = useDeleteSubject();
+
+  const [showModal, setShowModal] = useState(false);
+  const [newName, setNewName] = useState('');
+  const [createError, setCreateError] = useState('');
+  const [expanded, setExpanded] = useState<Record<number, boolean>>({});
+
+  async function handleCreate(e: React.FormEvent) {
+    e.preventDefault();
+    setCreateError('');
+    if (!newName.trim()) {
+      setCreateError('Name is required.');
+      return;
+    }
+    try {
+      const created = (await createSubject.mutateAsync({
+        name: newName.trim(),
+      })) as Subject;
+      setShowModal(false);
+      setNewName('');
+      setExpanded((prev) => ({ ...prev, [created.id]: true }));
+    } catch {
+      setCreateError('Failed to create subject.');
+    }
+  }
+
+  function handleDelete(id: number) {
+    if (!confirm('Delete this subject and all its courses?')) return;
+    deleteSubject.mutate(id);
+  }
+
+  function toggleExpand(id: number) {
+    setExpanded((prev) => ({ ...prev, [id]: !prev[id] }));
+  }
+
+  return (
+    <section>
+      <div className="mb-4 flex items-center justify-between">
+        <h2 className="text-lg font-semibold text-gray-300">Subjects</h2>
+        <button
+          onClick={() => setShowModal(true)}
+          className="rounded-lg bg-blue-600 px-4 py-1.5 text-sm font-medium text-white transition hover:bg-blue-500"
+        >
+          + New Subject
+        </button>
+      </div>
+
+      {isLoading && (
+        <div className="space-y-2">
+          {Array.from({ length: 3 }).map((_, i) => (
+            <div
+              key={i}
+              className="h-12 animate-pulse rounded-lg bg-gray-800"
+            />
+          ))}
+        </div>
+      )}
+
+      {!isLoading && subjects && subjects.length === 0 && (
+        <p className="text-gray-500">
+          No subjects yet. Create your first subject to start learning.
+        </p>
+      )}
+
+      {!isLoading && subjects && subjects.length > 0 && (
+        <div className="space-y-3">
+          {subjects.map((subject) => (
+            <div
+              key={subject.id}
+              className="rounded-lg border border-gray-700 bg-gray-800"
+            >
+              <div className="flex items-center justify-between px-4 py-3">
+                <button
+                  onClick={() => toggleExpand(subject.id)}
+                  className="flex items-center gap-2 text-left"
+                >
+                  <span className="text-gray-400 transition-transform" style={{
+                    display: 'inline-block',
+                    transform: expanded[subject.id] ? 'rotate(90deg)' : 'rotate(0deg)',
+                  }}>
+                    &#9654;
+                  </span>
+                  <span className="font-medium text-white">{subject.name}</span>
+                </button>
+                <button
+                  onClick={() => handleDelete(subject.id)}
+                  disabled={deleteSubject.isPending}
+                  className="rounded bg-red-700 px-3 py-1 text-xs text-white transition hover:bg-red-600 disabled:opacity-50"
+                >
+                  Delete
+                </button>
+              </div>
+
+              {expanded[subject.id] && (
+                <div className="border-t border-gray-700 px-4 py-3">
+                  <SubjectCourses subject={subject} />
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Create Subject Modal */}
+      {showModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60">
+          <div className="w-full max-w-lg rounded-xl bg-gray-800 p-6 shadow-xl">
+            <h3 className="mb-4 text-lg font-bold text-white">New Subject</h3>
+
+            {createError && (
+              <div className="mb-3 rounded-lg bg-red-900/50 px-3 py-2 text-sm text-red-300">
+                {createError}
+              </div>
+            )}
+
+            <form onSubmit={handleCreate} className="space-y-4">
+              <div>
+                <label className="mb-1 block text-sm font-medium text-gray-300">
+                  Name <span className="text-red-400">*</span>
+                </label>
+                <input
+                  type="text"
+                  value={newName}
+                  onChange={(e) => setNewName(e.target.value)}
+                  placeholder="Subject name..."
+                  className="w-full rounded-lg border border-gray-600 bg-gray-900 px-4 py-2 text-white placeholder-gray-500 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                />
+              </div>
+              <div className="flex justify-end gap-3 pt-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowModal(false);
+                    setCreateError('');
+                  }}
+                  className="rounded-lg border border-gray-600 px-4 py-2 text-sm text-gray-300 transition hover:bg-gray-700"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={createSubject.isPending}
+                  className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-blue-500 disabled:opacity-50"
+                >
+                  {createSubject.isPending ? 'Creating...' : 'Create'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+    </section>
+  );
+}
+
 const agentTypeRoutes: Record<string, (id: number) => string> = {
-  research: (id) => `/research/${id}`,
-  learning: (id) => `/learning/${id}`,
   social_media: (id) => `/social/${id}`,
 };
 
 const agentTypeLabels: Record<string, string> = {
-  research: 'Research',
-  learning: 'Learning',
   social_media: 'Social Media',
 };
 
@@ -490,6 +805,8 @@ export default function AgentDetail() {
         <CodingAgentView agentId={agentId} />
       ) : agent.type === 'research' ? (
         <ResearchAgentView agentId={agentId} />
+      ) : agent.type === 'learning' ? (
+        <LearningAgentView agentId={agentId} />
       ) : agentTypeRoutes[agent.type] ? (
         <div className="rounded-lg bg-gray-800 p-8 text-center">
           <p className="mb-4 text-gray-400">
