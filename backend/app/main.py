@@ -8,6 +8,7 @@ from app.api.agents import router as agents_router
 from app.api.auth import router as auth_router
 from app.api.projects import router as projects_router
 from app.api.users import router as users_router
+from app.api.ws import router as ws_router
 from app.auth import hash_password
 from app.database import engine, init_db
 from app.models.user import User
@@ -45,6 +46,7 @@ app.include_router(auth_router, prefix="/api")
 app.include_router(users_router, prefix="/api")
 app.include_router(agents_router, prefix="/api")
 app.include_router(projects_router, prefix="/api")
+app.include_router(ws_router)
 
 
 @app.get("/health")
