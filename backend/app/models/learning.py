@@ -10,6 +10,8 @@ class LearningSubject(SQLModel, table=True):
     user_id: int = Field(foreign_key="users.id", index=True)
     agent_id: int = Field(foreign_key="agents.id", index=True)
     name: str
+    slug: str = Field(default="")
+    workspace_path: str = Field(default="")
     created_at: datetime = Field(default_factory=datetime.utcnow)
 
 
@@ -20,8 +22,10 @@ class LearningCourse(SQLModel, table=True):
     user_id: int = Field(foreign_key="users.id", index=True)
     subject_id: int = Field(foreign_key="learning_subjects.id", index=True)
     name: str
+    slug: str = Field(default="")
     instructions: str = Field(default="")
     chat_history_path: str = Field(default="")
     student_notes_path: str = Field(default="")
+    workspace_path: str = Field(default="")
     created_at: datetime = Field(default_factory=datetime.utcnow)
     updated_at: datetime = Field(default_factory=datetime.utcnow)

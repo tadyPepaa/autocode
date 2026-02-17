@@ -6,6 +6,7 @@ from sqlmodel import select
 
 from app.api.agents import router as agents_router
 from app.api.auth import router as auth_router
+from app.api.learning import router as learning_router
 from app.api.projects import router as projects_router
 from app.api.research import router as research_router
 from app.api.users import router as users_router
@@ -48,6 +49,7 @@ app.include_router(users_router, prefix="/api")
 app.include_router(agents_router, prefix="/api")
 app.include_router(projects_router, prefix="/api")
 app.include_router(research_router, prefix="/api")
+app.include_router(learning_router, prefix="/api")
 app.include_router(ws_router)
 
 
