@@ -18,6 +18,12 @@ import {
   type Subject,
   type Course,
 } from '../api/learning';
+import {
+  useSocialAccounts,
+  useConnectInstagram,
+  useConnectFacebook,
+  useDisconnectAccount,
+} from '../api/social';
 
 const statusColors: Record<string, string> = {
   created: 'bg-gray-600',
@@ -760,13 +766,135 @@ function LearningAgentView({ agentId }: { agentId: number }) {
   );
 }
 
-const agentTypeRoutes: Record<string, (id: number) => string> = {
-  social_media: (id) => `/social/${id}`,
-};
+function SocialMediaAgentView({ agentId }: { agentId: number }) {
+  const { data: accounts, isLoading } = useSocialAccounts();
+  const connectInstagram = useConnectInstagram();
+  const connectFacebook = useConnectFacebook();
+  const disconnectAccount = useDisconnectAccount();
 
-const agentTypeLabels: Record<string, string> = {
-  social_media: 'Social Media',
-};
+  async function handleConnectInstagram() {
+    try {
+      const data = await connectInstagram.mutateAsync();
+      window.open(data.auth_url, '_blank');
+    } catch {
+      // ignore
+    }
+  }
+
+  async function handleConnectFacebook() {
+    try {
+      const data = await connectFacebook.mutateAsync();
+      window.open(data.auth_url, '_blank');
+    } catch {
+      // ignore
+    }
+  }
+
+  function handleDisconnect(id: number) {
+    if (!confirm('Disconnect this account?')) return;
+    disconnectAccount.mutate(id);
+  }
+
+  return (
+    <section className="space-y-6">
+      {/* Connected Accounts */}
+      <div>
+        <h2 className="mb-3 text-lg font-semibold text-gray-300">
+          Connected Accounts
+        </h2>
+
+        {isLoading && (
+          <div className="space-y-2">
+            {Array.from({ length: 2 }).map((_, i) => (
+              <div key={i} className="h-12 animate-pulse rounded-lg bg-gray-800" />
+            ))}
+          </div>
+        )}
+
+        {!isLoading && accounts && accounts.length === 0 && (
+          <p className="text-gray-500">No accounts connected. Connect Instagram or Facebook below.</p>
+        )}
+
+        {!isLoading && accounts && accounts.length > 0 && (
+          <div className="space-y-2">
+            {accounts.map((account) => (
+              <div
+                key={account.id}
+                className="flex items-center justify-between rounded-lg border border-gray-700 bg-gray-800 px-4 py-3"
+              >
+                <div className="flex items-center gap-3">
+                  <span
+                    className={`inline-flex h-8 w-8 items-center justify-center rounded-full text-sm font-bold text-white ${
+                      account.platform === 'instagram'
+                        ? 'bg-gradient-to-r from-purple-500 to-pink-500'
+                        : 'bg-blue-600'
+                    }`}
+                  >
+                    {account.platform === 'instagram' ? 'IG' : 'FB'}
+                  </span>
+                  <div>
+                    <p className="text-sm font-medium text-white">{account.account_name}</p>
+                    <p className="text-xs text-gray-500 capitalize">{account.platform}</p>
+                  </div>
+                </div>
+                <button
+                  onClick={() => handleDisconnect(account.id)}
+                  disabled={disconnectAccount.isPending}
+                  className="rounded bg-red-700 px-3 py-1 text-xs text-white transition hover:bg-red-600 disabled:opacity-50"
+                >
+                  Disconnect
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* Connect Buttons */}
+      <div>
+        <h2 className="mb-3 text-lg font-semibold text-gray-300">
+          Connect Platform
+        </h2>
+        <div className="flex gap-3">
+          <button
+            onClick={handleConnectInstagram}
+            disabled={connectInstagram.isPending}
+            className="rounded-lg bg-gradient-to-r from-purple-600 to-pink-600 px-5 py-2 text-sm font-medium text-white transition hover:from-purple-500 hover:to-pink-500 disabled:opacity-50"
+          >
+            {connectInstagram.isPending ? 'Connecting...' : 'Connect Instagram'}
+          </button>
+          <button
+            onClick={handleConnectFacebook}
+            disabled={connectFacebook.isPending}
+            className="rounded-lg bg-blue-600 px-5 py-2 text-sm font-medium text-white transition hover:bg-blue-500 disabled:opacity-50"
+          >
+            {connectFacebook.isPending ? 'Connecting...' : 'Connect Facebook'}
+          </button>
+        </div>
+        <p className="mt-2 text-xs text-gray-500">
+          OAuth will open in a new tab. Refresh this page after connecting.
+        </p>
+      </div>
+
+      {/* Link to Social Media Manager */}
+      <div className="rounded-lg border border-gray-700 bg-gray-800 p-6 text-center">
+        <p className="mb-3 text-gray-400">
+          Manage posts, stories, and messages in the Social Media Manager.
+        </p>
+        <Link
+          to={`/social/${agentId}`}
+          className="inline-block rounded-lg bg-blue-600 px-5 py-2 text-white transition hover:bg-blue-500"
+        >
+          Open Social Media Manager
+        </Link>
+      </div>
+    </section>
+  );
+}
+
+const agentTypeRoutes: Record<string, (id: number) => string> = {};
+
+const agentTypeLabels: Record<string, string> = {};
 
 export default function AgentDetail() {
   const { id } = useParams<{ id: string }>();
@@ -807,6 +935,8 @@ export default function AgentDetail() {
         <ResearchAgentView agentId={agentId} />
       ) : agent.type === 'learning' ? (
         <LearningAgentView agentId={agentId} />
+      ) : agent.type === 'social_media' ? (
+        <SocialMediaAgentView agentId={agentId} />
       ) : agentTypeRoutes[agent.type] ? (
         <div className="rounded-lg bg-gray-800 p-8 text-center">
           <p className="mb-4 text-gray-400">
