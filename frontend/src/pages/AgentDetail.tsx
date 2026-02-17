@@ -2,6 +2,12 @@ import { useState } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
 import { useAgent, useUpdateAgent } from '../api/agents';
 import { useProjects, useCreateProject, type Project } from '../api/projects';
+import {
+  useResearchSessions,
+  useCreateResearch,
+  useDeleteResearch,
+  type ResearchSession,
+} from '../api/research';
 
 const statusColors: Record<string, string> = {
   created: 'bg-gray-600',
@@ -264,6 +270,177 @@ function CodingAgentView({ agentId }: { agentId: number }) {
   );
 }
 
+const researchStatusColors: Record<string, string> = {
+  active: 'bg-green-600',
+  stopped: 'bg-yellow-600',
+};
+
+function ResearchAgentView({ agentId }: { agentId: number }) {
+  const { data: sessions, isLoading } = useResearchSessions(agentId);
+  const createResearch = useCreateResearch(agentId);
+  const deleteResearch = useDeleteResearch();
+  const navigate = useNavigate();
+
+  const [showModal, setShowModal] = useState(false);
+  const [newName, setNewName] = useState('');
+  const [createError, setCreateError] = useState('');
+
+  async function handleCreate(e: React.FormEvent) {
+    e.preventDefault();
+    setCreateError('');
+    if (!newName.trim()) {
+      setCreateError('Name is required.');
+      return;
+    }
+    try {
+      const created = (await createResearch.mutateAsync({
+        name: newName.trim(),
+      })) as ResearchSession;
+      setShowModal(false);
+      setNewName('');
+      navigate(`/research/${created.id}`);
+    } catch {
+      setCreateError('Failed to create research session.');
+    }
+  }
+
+  function handleDelete(id: number) {
+    if (!confirm('Delete this research session?')) return;
+    deleteResearch.mutate(id);
+  }
+
+  return (
+    <section>
+      <div className="mb-4 flex items-center justify-between">
+        <h2 className="text-lg font-semibold text-gray-300">
+          Research Sessions
+        </h2>
+        <button
+          onClick={() => setShowModal(true)}
+          className="rounded-lg bg-blue-600 px-4 py-1.5 text-sm font-medium text-white transition hover:bg-blue-500"
+        >
+          + New Research
+        </button>
+      </div>
+
+      {isLoading && (
+        <div className="space-y-2">
+          {Array.from({ length: 3 }).map((_, i) => (
+            <div
+              key={i}
+              className="h-12 animate-pulse rounded-lg bg-gray-800"
+            />
+          ))}
+        </div>
+      )}
+
+      {!isLoading && sessions && sessions.length === 0 && (
+        <p className="text-gray-500">
+          No research sessions yet. Create your first one.
+        </p>
+      )}
+
+      {!isLoading && sessions && sessions.length > 0 && (
+        <div className="overflow-hidden rounded-lg border border-gray-700">
+          <table className="w-full text-left text-sm">
+            <thead className="bg-gray-800 text-gray-400">
+              <tr>
+                <th className="px-4 py-3 font-medium">Name</th>
+                <th className="px-4 py-3 font-medium">Status</th>
+                <th className="px-4 py-3 font-medium">Created</th>
+                <th className="px-4 py-3 font-medium" />
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-gray-700">
+              {sessions.map((session) => (
+                <tr key={session.id} className="hover:bg-gray-800/50">
+                  <td className="px-4 py-3 text-white">{session.name}</td>
+                  <td className="px-4 py-3">
+                    <span
+                      className={`inline-block rounded-full px-2 py-0.5 text-xs font-medium text-white ${researchStatusColors[session.status] ?? 'bg-gray-600'}`}
+                    >
+                      {session.status}
+                    </span>
+                  </td>
+                  <td className="px-4 py-3 text-gray-400">
+                    {new Date(session.created_at).toLocaleDateString()}
+                  </td>
+                  <td className="px-4 py-3 text-right space-x-2">
+                    <Link
+                      to={`/research/${session.id}`}
+                      className="rounded bg-gray-700 px-3 py-1 text-xs text-white transition hover:bg-gray-600"
+                    >
+                      Open
+                    </Link>
+                    <button
+                      onClick={() => handleDelete(session.id)}
+                      disabled={deleteResearch.isPending}
+                      className="rounded bg-red-700 px-3 py-1 text-xs text-white transition hover:bg-red-600 disabled:opacity-50"
+                    >
+                      Delete
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {/* Create Research Modal */}
+      {showModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60">
+          <div className="w-full max-w-lg rounded-xl bg-gray-800 p-6 shadow-xl">
+            <h3 className="mb-4 text-lg font-bold text-white">
+              New Research Session
+            </h3>
+
+            {createError && (
+              <div className="mb-3 rounded-lg bg-red-900/50 px-3 py-2 text-sm text-red-300">
+                {createError}
+              </div>
+            )}
+
+            <form onSubmit={handleCreate} className="space-y-4">
+              <div>
+                <label className="mb-1 block text-sm font-medium text-gray-300">
+                  Name <span className="text-red-400">*</span>
+                </label>
+                <input
+                  type="text"
+                  value={newName}
+                  onChange={(e) => setNewName(e.target.value)}
+                  placeholder="Research topic..."
+                  className="w-full rounded-lg border border-gray-600 bg-gray-900 px-4 py-2 text-white placeholder-gray-500 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                />
+              </div>
+              <div className="flex justify-end gap-3 pt-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowModal(false);
+                    setCreateError('');
+                  }}
+                  className="rounded-lg border border-gray-600 px-4 py-2 text-sm text-gray-300 transition hover:bg-gray-700"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={createResearch.isPending}
+                  className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-blue-500 disabled:opacity-50"
+                >
+                  {createResearch.isPending ? 'Creating...' : 'Create'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+    </section>
+  );
+}
+
 const agentTypeRoutes: Record<string, (id: number) => string> = {
   research: (id) => `/research/${id}`,
   learning: (id) => `/learning/${id}`,
@@ -311,6 +488,8 @@ export default function AgentDetail() {
       {/* Render based on agent type */}
       {agent.type === 'coding' ? (
         <CodingAgentView agentId={agentId} />
+      ) : agent.type === 'research' ? (
+        <ResearchAgentView agentId={agentId} />
       ) : agentTypeRoutes[agent.type] ? (
         <div className="rounded-lg bg-gray-800 p-8 text-center">
           <p className="mb-4 text-gray-400">
