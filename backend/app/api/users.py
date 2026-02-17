@@ -18,6 +18,7 @@ router = APIRouter(prefix="/users", tags=["users"])
 class CreateUserRequest(BaseModel):
     username: str
     password: str
+    role: str | None = None
 
 
 class UserResponse(BaseModel):
@@ -51,6 +52,7 @@ async def create_user(
     user = User(
         username=body.username,
         password_hash=hash_password(body.password),
+        **({"role": body.role} if body.role else {}),
     )
     session.add(user)
     session.commit()
