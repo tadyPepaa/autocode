@@ -39,6 +39,18 @@ export function useCreateResearch(agentId: number) {
   });
 }
 
+export function useUpdateResearch() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, name }: { id: number; name: string }) =>
+      api.put(`/research/${id}`, { name }).then(r => r.data),
+    onSuccess: (_, { id }) => {
+      qc.invalidateQueries({ queryKey: ['research-session', id] });
+      qc.invalidateQueries({ queryKey: ['research-sessions'] });
+    },
+  });
+}
+
 export function useDeleteResearch() {
   const qc = useQueryClient();
   return useMutation({

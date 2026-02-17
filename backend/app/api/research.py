@@ -157,6 +157,28 @@ async def get_research_session(
     return _get_session_or_404(session_id, user, db)
 
 
+class UpdateResearchRequest(BaseModel):
+    name: str
+
+
+@router.put(
+    "/research/{session_id}",
+    response_model=ResearchSessionResponse,
+)
+async def update_research_session(
+    session_id: int,
+    body: UpdateResearchRequest,
+    db: Session = Depends(get_session),
+    user: User = Depends(get_current_user),
+):
+    research = _get_session_or_404(session_id, user, db)
+    research.name = body.name
+    db.add(research)
+    db.commit()
+    db.refresh(research)
+    return research
+
+
 @router.delete("/research/{session_id}")
 async def delete_research_session(
     session_id: int,
