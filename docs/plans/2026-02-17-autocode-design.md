@@ -365,10 +365,49 @@ Single VPS deployment:
 
 ---
 
+## Pre-built Agent Templates
+
+Users can create agents from templates (one click, then customize) or build from scratch.
+
+### 1. Coding Agent (Kodovací agent)
+- **Model**: GPT 5.3 Codex (configurable)
+- **Purpose**: Autonomously manages Claude Code via tmux, implements entire projects
+- **Tools**: tmux, exec, read_file, write_file, web_search
+- **Special**: Control loop (send task → monitor → evaluate → next task), per-project instances, layered config (global rules + project CLAUDE.md)
+
+### 2. Research Agent (Výzkumný agent)
+- **Model**: Claude Opus 4.6 (configurable)
+- **Purpose**: Searches the web, analyzes information, produces structured summaries and reports
+- **Tools**: web_search, web_fetch, read_file, write_file
+- **Special**: Can save findings to files, supports deep multi-step research with source citations
+
+### 3. Personal Assistant (Osobní asistent)
+- **Model**: Claude Sonnet 4.5 (configurable)
+- **Purpose**: Answers questions, helps with texts, translations, brainstorming, everyday tasks
+- **Tools**: web_search, web_fetch
+- **Special**: Conversational, remembers user preferences via nanobot memory system
+
+### 4. Learning & Tutor Agent (Vzdělávací agent)
+- **Model**: Claude Opus 4.6 (configurable)
+- **Purpose**: Personalized tutor — language learning (conversation practice, grammar, vocabulary), topic explanations, quizzes, progress tracking
+- **Tools**: web_search, web_fetch, read_file, write_file
+- **Special**: Tracks what user already knows, adapts difficulty, supports spaced repetition, can create flashcards and exercises, stores progress in memory
+
+### 5. Social Media Manager (Agent pro správu sociálních sítí)
+- **Model**: Claude Sonnet 4.5 (configurable)
+- **Purpose**: Generates posts for social media, plans content calendar, writes captions, suggests hashtags, analyzes trends, drafts stories/reels scripts
+- **Tools**: web_search, web_fetch, read_file, write_file
+- **Special**: Supports multiple platforms (Instagram, TikTok, LinkedIn, X), maintains brand voice per user, can generate content batches for the week, stores content calendar in workspace
+
+### Custom Agent
+Users can always create a fully custom agent via Agent Builder with arbitrary model, identity, tools, and MCP servers.
+
+---
+
 ## Future Extensibility
 
-- More agent types (research, devops, assistant) — just create via Agent Builder
 - Agent-to-agent communication (one agent delegates to another)
 - Notification system (Telegram/email when project completes or needs help)
 - Project templates (predefined stacks/architectures)
 - Cost tracking (LLM API usage per project/user)
+- More pre-built templates (Finance, Email, DevOps, ...)
