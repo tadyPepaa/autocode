@@ -30,24 +30,23 @@ Private/family use. Admin (owner) creates accounts for family members. Each user
 │  ├── REST API (agents, projects, users CRUD)         │
 │  ├── WebSocket (live log stream, xterm.js terminal)  │
 │  ├── Agent Orchestrator (subprocess management)      │
-│  └── Tmux Manager (session lifecycle)                │
+│  ├── Tmux Manager (session lifecycle)                │
+│  └── Social Media API integration (IG/FB Graph API)  │
 │                                                      │
 │  SQLite database                                     │
-│  Filesystem: /data/users/{username}/projects/        │
-│  Tmux: {username}-{project-name} sessions            │
+│  Filesystem: /data/users/{username}/                 │
+│  Tmux: {username}-{session-name} sessions            │
 └─────────────────────────────────────────────────────┘
          │
          │ subprocess per agent instance
          ▼
 ┌─────────────────────────────────────────────────────┐
-│              Nanobot Instances                        │
+│              Agent Instances                          │
 │                                                      │
-│  Each instance = isolated subprocess with:           │
-│  ├── Own AgentLoop (nanobot-ai)                      │
-│  ├── Own config (model, identity, tools)             │
-│  ├── Own workspace directory                         │
-│  ├── Own memory files (MEMORY.md, HISTORY.md)        │
-│  └── Own tmux session (if applicable)                │
+│  Coding Agent: nanobot subprocess → tmux → claude    │
+│  Research Agent: claude code session (chat)           │
+│  Learning Agent: nanobot subprocess (direct AI)       │
+│  Social Media: web app + AI chat assistant            │
 └─────────────────────────────────────────────────────┘
 ```
 
@@ -63,9 +62,10 @@ Private/family use. Admin (owner) creates accounts for family members. Each user
 | Backend | FastAPI (Python 3.11+) |
 | Auth | JWT (short-lived access + refresh token) |
 | Database | SQLite (SQLModel ORM) |
-| Agent Framework | nanobot-ai (as library) |
+| Agent Framework | nanobot-ai (as library, for coding + learning agents) |
 | Agent LLM | Configurable per agent (GPT 5.3 Codex, Claude Opus 4.6, etc.) |
 | Process Management | Python subprocess + tmux |
+| Social Media | Instagram Graph API + Facebook Graph API |
 | Reverse Proxy | Caddy (auto TLS) |
 
 ---
@@ -86,16 +86,16 @@ created_at: datetime
 id: int (PK)
 user_id: int (FK users)
 name: str
+type: str ("coding" | "research" | "learning" | "social_media" | "custom")
 model: str (e.g. "openai/gpt-5.3-codex")
 identity: text (behavior rules, IDENTITY.md content)
 tools: json (list of enabled tools)
 mcp_servers: json (MCP server configs)
-workspace_base: str (base directory for instances)
 global_rules: text (shared rules across all instances)
 created_at: datetime
 ```
 
-### projects (agent instances for coding agent)
+### projects (coding agent instances)
 ```
 id: int (PK)
 user_id: int (FK users)
@@ -113,12 +113,70 @@ created_at: datetime
 updated_at: datetime
 ```
 
+### research_sessions (research agent)
+```
+id: int (PK)
+user_id: int (FK users)
+agent_id: int (FK agents)
+name: str
+slug: str
+status: str ("active" | "archived")
+tmux_session: str (tmux session name for claude code)
+workspace_path: str
+created_at: datetime
+updated_at: datetime
+```
+
+### learning_subjects (learning agent — folders)
+```
+id: int (PK)
+user_id: int (FK users)
+agent_id: int (FK agents)
+name: str (e.g. "Angličtina")
+created_at: datetime
+```
+
+### learning_courses (learning agent — sessions within subject)
+```
+id: int (PK)
+user_id: int (FK users)
+subject_id: int (FK learning_subjects)
+name: str (e.g. "Konverzace")
+instructions: text (custom instructions for this course)
+chat_history_path: str (path to chat_history.json)
+student_notes_path: str (path to student_notes.md)
+created_at: datetime
+updated_at: datetime
+```
+
+### social_accounts (social media agent)
+```
+id: int (PK)
+user_id: int (FK users)
+agent_id: int (FK agents)
+platform: str ("instagram" | "facebook")
+access_token: str (encrypted)
+account_name: str
+created_at: datetime
+```
+
+### chat_messages (shared for research + learning + social AI chat)
+```
+id: int (PK)
+user_id: int (FK users)
+session_type: str ("research" | "learning" | "social_ai")
+session_id: int (FK to respective session table)
+role: str ("user" | "assistant")
+content: text
+created_at: datetime
+```
+
 ### agent_instances (running instances)
 ```
 id: int (PK)
 user_id: int (FK users)
 agent_id: int (FK agents)
-project_id: int (FK projects, nullable — non-project agents)
+project_id: int (FK projects, nullable)
 pid: int (OS process ID)
 status: str ("running" | "stopped" | "crashed")
 started_at: datetime
@@ -156,43 +214,51 @@ An agent is a **template** (type definition), not a running instance. It defines
 - Available tools
 - Global rules shared across all instances
 
+Users create agents from pre-built templates or build custom ones via Agent Builder.
+
 ### Agent Instances
 
-When a project starts (or a non-project agent is activated), a **subprocess** is spawned from the template:
-- Own nanobot AgentLoop with template config
+When a project/session starts, a **subprocess** is spawned from the template:
+- Own config derived from template
 - Own workspace directory
-- Own memory files
+- Own memory/history files
 - Fully isolated from other instances
 
-### Coding Agent — Control Loop
+---
 
-The coding agent's core loop for managing Claude Code:
+## Agent Details
 
+### 1. Coding Agent
+
+**How it works**: Nanobot (GPT 5.3 Codex) autonomously manages Claude Code (Opus 4.6) via tmux.
+
+**Architecture**:
+- Each project = own subprocess + own tmux session + own workspace
+- Nanobot composes prompts and sends to Claude Code via `tmux send-keys`
+- Monitors output via `tmux capture-pane` (polling every 2s)
+- Evaluates results and decides next action
+
+**Control Loop**:
 ```
-1. SEND TASK
-   - Read current step from implementation_plan
-   - Compose prompt with project context
-   - tmux send-keys to Claude Code session
-
-2. MONITOR (poll every 2 seconds)
-   - tmux capture-pane to read output
-   - Detect: waiting for input / error / asking confirmation
-   - Stream output to web UI via WebSocket
-
-3. EVALUATE
-   - Nanobot (GPT 5.3) analyzes Claude Code output
-   - Decides: task complete / needs fix / needs different approach
-
-4. NEXT ACTION
-   - Complete → mark step done, send next step
-   - Error → send fix instructions
-   - Stuck (3x same error) → try different approach
-   - Still stuck → escalate to web UI ("needs help")
-
-5. ALL STEPS DONE → mark project as completed
+1. SEND TASK — read current step, compose prompt, tmux send-keys
+2. MONITOR — capture-pane polling, stream to web UI via WebSocket
+3. EVALUATE — nanobot analyzes output, decides: complete / fix / retry
+4. NEXT ACTION — mark step done + next task / send fix / escalate
+5. ALL STEPS DONE → project completed
 ```
 
-### Edge Case Handling
+**Task Input**: Flexible — user provides just a goal, or goal + architecture + details. Agent generates implementation plan autonomously.
+
+**Layered Configuration**:
+```
+Global rules: ~/.autocode/agents/{agent-id}/RULES.md
+  (shared across all projects, managed via web UI)
+Project config: /data/users/{user}/projects/{project}/.claude/CLAUDE.md
+  (tech stack, conventions, specific instructions)
+Nanobot identity = Global RULES + Project CLAUDE.md + description + architecture + plan
+```
+
+**Edge Cases**:
 
 | Situation | Response |
 |-----------|----------|
@@ -202,20 +268,92 @@ The coding agent's core loop for managing Claude Code:
 | Repeated error (3x) | Try alternative approach or escalate |
 | Context window full | Detect compression, send state summary, continue |
 
-### Layered Configuration
+**Consultation**: Nanobot (GPT 5.3) consults with Claude Code (Opus 4.6) on approaches, searches web for current best practices.
 
+### 2. Research Agent
+
+**How it works**: Chat interface over Claude Code. Each research = isolated Claude Code session.
+
+**Architecture**:
+- User creates "New Research" → opens empty chat
+- Backend starts new tmux session with `claude` (with research system prompt)
+- User types questions, Claude Code researches and responds
+- Each research session is fully isolated (only knows system prompt + own conversation)
+- User can return to old sessions anytime (like `claude --resume`)
+
+**Filesystem**:
 ```
-Global agent rules (shared across all projects of this agent type):
-  ~/.autocode/agents/{agent-id}/RULES.md
-  Managed via web UI "Global Rules" editor on agent detail page
-
-Project-specific config:
-  /data/users/{user}/projects/{project}/.claude/CLAUDE.md
-  Contains: tech stack, project conventions, specific instructions
-
-Nanobot identity (per instance):
-  = Global RULES.md + Project CLAUDE.md + Project description + Architecture + Plan
+/data/users/{user}/research/
+├── nextjs-hosting/        ← research session
+│   └── (claude code session data)
+├── headless-cms/
+└── rust-ecosystem/
 ```
+
+### 3. Learning & Tutor Agent
+
+**How it works**: AI agent directly (nanobot, not Claude Code). Two-level hierarchy: subjects → courses.
+
+**Architecture**:
+- Subject = organizational folder (e.g. "Angličtina")
+- Course = agent session with custom instructions (e.g. "Konverzace", "Gramatika", "Slovíčka")
+- Each course has one continuous conversation — agent remembers everything
+- Agent maintains `student_notes.md` per course — tracks what user knows, weaknesses, progress
+- On each conversation start, agent reads student_notes.md to know where to continue
+
+**Filesystem**:
+```
+/data/users/{user}/learning/
+├── anglictina/                    ← subject
+│   ├── konverzace/                ← course
+│   │   ├── chat_history.json
+│   │   └── student_notes.md
+│   ├── gramatika/
+│   │   ├── chat_history.json
+│   │   └── student_notes.md
+│   └── slovicka/
+│       ├── chat_history.json
+│       └── student_notes.md
+└── python/                        ← subject
+    ├── basics/
+    └── async-programming/
+```
+
+**student_notes.md** (maintained by agent):
+```
+Level: B1
+Strengths: food vocabulary, travel situations
+Weaknesses: present perfect vs past simple, articles
+Last lesson: ordering at restaurant
+Covered: airport, hotel, restaurant
+Recurring mistakes:
+  - "I have been there yesterday" → "I was there yesterday"
+```
+
+### 4. Social Media Manager
+
+**How it works**: Web app with Instagram/Facebook API integration + AI chat assistant.
+
+**NOT an autonomous agent** — it's a social media management tool built into the platform.
+
+**Features**:
+- View own feed (posts with reach/likes/comments metrics)
+- View own stories
+- Create posts (text + image/video) — publish to IG only / FB only / both
+- Reply to comments and DMs
+- AI chat assistant — "write a post about product X" → generates text + hashtags → user edits → publishes
+
+**API Integration**:
+- Instagram Graph API (via Facebook Developer)
+- Facebook Graph API
+- OAuth flow to connect accounts
+
+**UI Sections** (sub-navigation within agent):
+- Feed (own posts + metrics)
+- Stories (own stories)
+- New Post (composer with IG/FB toggle)
+- DMs/Comments (inbox)
+- AI Assistant (chat for content ideas)
 
 ---
 
@@ -237,19 +375,27 @@ Dashboard
 👤 Admin Panel       (admin only)
 ```
 
+Agents are dynamically added to sidebar as user creates them. Clicking an agent opens its detail page.
+
 ### Pages
 
 **Dashboard** — overview of all agents, their status, active tasks across all projects.
 
-**Agent Detail** — agent config, global rules editor, list of projects/instances with status, [+ New Project] button.
+**Coding Agent Detail** — global rules editor, list of projects with status/progress, [+ New Project].
 
-**Project Detail** — project goal, architecture, implementation plan with step progress, live log stream, tabs:
+**Coding Project Detail** — project goal, architecture, implementation plan with step progress, live log stream, tabs:
 - Terminal (xterm.js — live Claude Code session via WebSocket)
 - Logs (structured agent decision log)
 - Description (editable project goal)
 - Architecture (editable architecture document)
 
-**Agent Builder** — form to create new agent: name, model, identity/rules, tool selection, MCP servers.
+**Research Agent Detail** — list of research sessions, [+ New Research]. Click session → chat interface with Claude Code.
+
+**Learning Agent Detail** — list of subjects, each expandable to show courses. [+ New Subject], [+ New Course]. Click course → chat interface with tutor agent.
+
+**Social Media Agent Detail** — sub-navigation: Feed, Stories, New Post, DMs/Comments, AI Assistant.
+
+**Agent Builder** — choose from pre-built template or create custom. Form: name, model, identity/rules, tool selection, MCP servers.
 
 **Admin Panel** (admin only) — user list with agent count, create user form (username + password), delete user.
 
@@ -269,7 +415,7 @@ Dashboard
 Admin clicks "Create User" → enters username + password → backend:
 1. Creates DB record (users table, role="user")
 2. Creates workspace: `/data/users/{username}/`
-3. Creates subdirs: `projects/`, `config/`
+3. Creates subdirs: `projects/`, `research/`, `learning/`, `config/`
 4. User can log in immediately
 
 ### Isolation
@@ -302,8 +448,8 @@ Admin clicks "Create User" → enters username + password → backend:
 - `PUT /agents/{id}` — update agent config
 - `DELETE /agents/{id}` — delete agent + all instances
 
-### Projects
-- `GET /agents/{id}/projects` — list projects for agent
+### Projects (coding agent)
+- `GET /agents/{id}/projects` — list projects
 - `POST /agents/{id}/projects` — create project
 - `GET /projects/{id}` — project detail
 - `PUT /projects/{id}` — update project
@@ -312,9 +458,39 @@ Admin clicks "Create User" → enters username + password → backend:
 - `POST /projects/{id}/stop` — stop agent instance
 - `POST /projects/{id}/restart` — restart agent instance
 
+### Research
+- `GET /agents/{id}/research` — list research sessions
+- `POST /agents/{id}/research` — create new research session
+- `GET /research/{id}` — research session detail + chat history
+- `DELETE /research/{id}` — delete research session
+- `POST /research/{id}/resume` — resume claude code session
+- `POST /research/{id}/message` — send message to claude code
+
+### Learning
+- `GET /agents/{id}/subjects` — list subjects
+- `POST /agents/{id}/subjects` — create subject
+- `DELETE /subjects/{id}` — delete subject
+- `GET /subjects/{id}/courses` — list courses
+- `POST /subjects/{id}/courses` — create course
+- `GET /courses/{id}` — course detail + chat history
+- `DELETE /courses/{id}` — delete course
+- `POST /courses/{id}/message` — send message to tutor agent
+
+### Social Media
+- `GET /social/feed` — get own posts with metrics
+- `GET /social/stories` — get own stories
+- `POST /social/posts` — create and publish post
+- `GET /social/comments` — get comments on posts
+- `POST /social/comments/{id}/reply` — reply to comment
+- `GET /social/dms` — get DM conversations
+- `POST /social/dms/{id}/reply` — reply to DM
+- `POST /social/ai/chat` — send message to AI assistant
+
 ### WebSocket
-- `WS /ws/project/{id}/logs` — live log stream
-- `WS /ws/project/{id}/terminal` — xterm.js terminal (tmux capture-pane stream)
+- `WS /ws/project/{id}/logs` — live log stream (coding agent)
+- `WS /ws/project/{id}/terminal` — xterm.js terminal
+- `WS /ws/research/{id}/chat` — research chat stream
+- `WS /ws/course/{id}/chat` — learning chat stream
 
 ---
 
@@ -325,8 +501,7 @@ Admin clicks "Create User" → enters username + password → backend:
   users/
     tomas/
       config/
-        api_keys.json (encrypted)
-      projects/
+      projects/                          # coding agent
         eshop/
           .claude/CLAUDE.md
           .nanobot/
@@ -334,15 +509,26 @@ Admin clicks "Create User" → enters username + password → backend:
             IDENTITY.md
             MEMORY.md
             HISTORY.md
-          src/
-          ...
-        deploy-cli/
-          ...
+          src/...
+        deploy-cli/...
+      research/                          # research agent
+        nextjs-hosting/
+        headless-cms/
+      learning/                          # learning agent
+        anglictina/
+          konverzace/
+            chat_history.json
+            student_notes.md
+          gramatika/
+            chat_history.json
+            student_notes.md
+        python/
+          basics/...
     lucka/
       config/
-      projects/
-        blog/
-          ...
+      projects/...
+      research/...
+      learning/...
 
 /opt/autocode/
   backend/           # FastAPI app
@@ -373,41 +559,46 @@ Users can create agents from templates (one click, then customize) or build from
 - **Model**: GPT 5.3 Codex (configurable)
 - **Purpose**: Autonomously manages Claude Code via tmux, implements entire projects
 - **Tools**: tmux, exec, read_file, write_file, web_search
-- **Special**: Control loop (send task → monitor → evaluate → next task), per-project instances, layered config (global rules + project CLAUDE.md)
+- **Special**: Control loop, per-project instances, layered config
 
 ### 2. Research Agent (Výzkumný agent)
 - **Model**: Claude Opus 4.6 (configurable)
-- **Purpose**: Searches the web, analyzes information, produces structured summaries and reports
-- **Tools**: web_search, web_fetch, read_file, write_file
-- **Special**: Can save findings to files, supports deep multi-step research with source citations
+- **Purpose**: Chat interface over Claude Code for web research, analysis, reports
+- **Tools**: (Claude Code built-in — web search, file access)
+- **Special**: Isolated sessions, resume support
 
-### 3. Personal Assistant (Osobní asistent)
-- **Model**: Claude Sonnet 4.5 (configurable)
-- **Purpose**: Answers questions, helps with texts, translations, brainstorming, everyday tasks
-- **Tools**: web_search, web_fetch
-- **Special**: Conversational, remembers user preferences via nanobot memory system
-
-### 4. Learning & Tutor Agent (Vzdělávací agent)
+### 3. Learning & Tutor Agent (Vzdělávací agent)
 - **Model**: Claude Opus 4.6 (configurable)
-- **Purpose**: Personalized tutor — language learning (conversation practice, grammar, vocabulary), topic explanations, quizzes, progress tracking
+- **Purpose**: Personalized tutor — subjects with courses, custom instructions, student progress tracking
 - **Tools**: web_search, web_fetch, read_file, write_file
-- **Special**: Tracks what user already knows, adapts difficulty, supports spaced repetition, can create flashcards and exercises, stores progress in memory
+- **Special**: Two-level hierarchy (subject → course), student_notes.md, continuous conversation per course
 
-### 5. Social Media Manager (Agent pro správu sociálních sítí)
+### 4. Social Media Manager (Správa sociálních sítí)
 - **Model**: Claude Sonnet 4.5 (configurable)
-- **Purpose**: Generates posts for social media, plans content calendar, writes captions, suggests hashtags, analyzes trends, drafts stories/reels scripts
-- **Tools**: web_search, web_fetch, read_file, write_file
-- **Special**: Supports multiple platforms (Instagram, TikTok, LinkedIn, X), maintains brand voice per user, can generate content batches for the week, stores content calendar in workspace
+- **Purpose**: Manage Instagram + Facebook — view feed/stories, create posts, reply to comments/DMs, AI content assistant
+- **Tools**: Instagram Graph API, Facebook Graph API
+- **Special**: Not autonomous agent — integrated social media management tool with AI chat
 
 ### Custom Agent
-Users can always create a fully custom agent via Agent Builder with arbitrary model, identity, tools, and MCP servers.
+Users can create fully custom agents via Agent Builder with arbitrary model, identity, tools, and MCP servers.
 
 ---
 
-## Future Extensibility
+## MVP Scope
 
-- Agent-to-agent communication (one agent delegates to another)
-- Notification system (Telegram/email when project completes or needs help)
-- Project templates (predefined stacks/architectures)
-- Cost tracking (LLM API usage per project/user)
+### MVP1
+- Coding Agent (full)
+- Research Agent (full)
+- Learning Agent (full)
+- Social Media Manager (full)
+- Agent Builder (custom agents)
+- Admin Panel (user management)
+- Auth (JWT, username/password)
+- PWA
+
+### MVP2
+- Personal Assistant (calendar, reminders, integrations)
+- Agent-to-agent communication
+- Notification system (Telegram/email)
+- Cost tracking (LLM API usage)
 - More pre-built templates (Finance, Email, DevOps, ...)
