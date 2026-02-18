@@ -1,5 +1,6 @@
 import asyncio
 import json
+import os
 
 
 async def run_claude_message(
@@ -17,9 +18,13 @@ async def run_claude_message(
     if is_continuation:
         cmd.append("-c")
 
+    # Remove CLAUDECODE env var to avoid nested session detection
+    env = {k: v for k, v in os.environ.items() if k != "CLAUDECODE"}
+
     proc = await asyncio.create_subprocess_exec(
         *cmd,
         cwd=workspace_path,
+        env=env,
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,
     )

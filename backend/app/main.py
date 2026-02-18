@@ -17,8 +17,16 @@ from app.api.settings import router as settings_router
 from app.api.social import router as social_router
 from app.api.ws import router as ws_router
 from app.auth import hash_password
+from app.config import settings
 from app.database import engine, init_db
 from app.models.user import User
+
+
+def _ensure_user_dirs(username: str) -> None:
+    """Create workspace directories for a user."""
+    user_dir = Path(settings.data_dir) / username
+    for subdir in ("projects", "research", "learning", "config"):
+        (user_dir / subdir).mkdir(parents=True, exist_ok=True)
 
 
 @asynccontextmanager
@@ -36,6 +44,7 @@ async def lifespan(app: FastAPI):
             )
             session.add(admin)
             session.commit()
+        _ensure_user_dirs("admin")
     yield
 
 

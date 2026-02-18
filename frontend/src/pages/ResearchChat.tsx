@@ -4,8 +4,8 @@ import { useResearchSession, useCancelResearch, useSendMessage, useUpdateResearc
 import ChatInterface from '../components/ChatInterface';
 
 const statusColors: Record<string, string> = {
-  active: 'bg-green-600',
-  stopped: 'bg-yellow-600',
+  idle: 'bg-gray-600',
+  thinking: 'bg-blue-600 animate-pulse',
 };
 
 function EditableName({ sessionId, name }: { sessionId: number; name: string }) {
@@ -106,7 +106,7 @@ export default function ResearchChat() {
         </div>
 
         <div className="flex gap-2">
-          {session.status === 'active' && (
+          {session.status === 'thinking' && (
             <button
               onClick={() => cancelResearch.mutate(sessionId)}
               disabled={cancelResearch.isPending}
