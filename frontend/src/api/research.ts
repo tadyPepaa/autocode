@@ -50,6 +50,8 @@ export function useResearchSession(sessionId: number) {
     queryKey: ['research-session', sessionId],
     queryFn: () => api.get(`/research/${sessionId}`).then(r => r.data),
     enabled: !!sessionId,
+    retry: 1,
+    refetchInterval: 2000,
   });
 }
 
@@ -119,6 +121,11 @@ export function useResearchFileContent(sessionId: number, path: string | null) {
     enabled: !!sessionId && !!path,
     refetchInterval: 3000,
   });
+}
+
+export function getRawFileUrl(sessionId: number, path: string): string {
+  const token = localStorage.getItem('access_token');
+  return `/api/research/${sessionId}/file-raw?path=${encodeURIComponent(path)}&token=${encodeURIComponent(token || '')}`;
 }
 
 export function useCancelResearch() {

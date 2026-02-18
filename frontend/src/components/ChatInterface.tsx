@@ -1,8 +1,8 @@
 import { useState, useRef, useEffect } from 'react';
 import Markdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import { useResearchMessages, useResearchSession } from '../api/research';
-import MarkdownCanvas from './MarkdownCanvas';
+import { useResearchMessages } from '../api/research';
+import FileExplorer from './FileExplorer';
 
 interface ChatInterfaceProps {
   sessionId: number;
@@ -12,12 +12,12 @@ interface ChatInterfaceProps {
 
 export default function ChatInterface({ sessionId, onSendMessage, isSending }: ChatInterfaceProps) {
   const { data: messages = [] } = useResearchMessages(sessionId);
-  const { data: session } = useResearchSession(sessionId);
   const [input, setInput] = useState('');
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
-  const isThinking = session?.status === 'thinking';
+  // Derive thinking state from messages — last message is user means waiting for assistant response
+  const isThinking = messages.length > 0 && messages[messages.length - 1].role === 'user';
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -126,9 +126,9 @@ export default function ChatInterface({ sessionId, onSendMessage, isSending }: C
         </div>
       </div>
 
-      {/* Markdown Canvas - right side */}
+      {/* File Explorer - right side */}
       <div className="w-[40%] rounded-lg border border-gray-700 bg-gray-800">
-        <MarkdownCanvas sessionId={sessionId} />
+        <FileExplorer sessionId={sessionId} />
       </div>
     </div>
   );

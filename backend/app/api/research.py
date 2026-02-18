@@ -1,14 +1,17 @@
 import asyncio
+import mimetypes
 import re
 import shutil
 from datetime import datetime
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi.responses import FileResponse
 from pydantic import BaseModel
 from sqlmodel import Session, select
 
 from app.api.deps import get_current_user
+from app.auth import decode_token
 from app.config import settings
 from app.database import engine, get_session
 from app.models.agent import Agent
@@ -404,14 +407,16 @@ async def list_research_files(
         return []
 
     files = []
-    for md_file in sorted(workspace.rglob("*.md")):
-        # Skip hidden dirs like .claude/
-        if any(part.startswith(".") for part in md_file.relative_to(workspace).parts):
+    for file in sorted(workspace.rglob("*")):
+        if not file.is_file():
             continue
-        stat = md_file.stat()
+        # Skip hidden dirs/files like .claude/
+        if any(part.startswith(".") for part in file.relative_to(workspace).parts):
+            continue
+        stat = file.stat()
         files.append(FileInfo(
-            name=md_file.name,
-            path=str(md_file.relative_to(workspace)),
+            name=file.name,
+            path=str(file.relative_to(workspace)),
             size=stat.st_size,
             modified_at=stat.st_mtime,
         ))
@@ -441,3 +446,40 @@ async def get_research_file_content(
 
     content = target.read_text(encoding="utf-8")
     return FileContent(name=target.name, path=path, content=content)
+
+
+@router.get(
+    "/research/{session_id}/file-raw",
+)
+async def get_research_file_raw(
+    session_id: int,
+    path: str = Query(...),
+    token: str = Query(...),
+    db: Session = Depends(get_session),
+):
+    # Auth via query param (needed for img/iframe/download)
+    try:
+        payload = decode_token(token)
+        user_id = int(payload["sub"])
+    except Exception:
+        raise HTTPException(status_code=401, detail="Invalid token")
+    user = db.get(User, user_id)
+    if not user:
+        raise HTTPException(status_code=401, detail="User not found")
+
+    research = _get_session_or_404(session_id, user, db)
+    workspace = Path(research.workspace_path)
+    target = (workspace / path).resolve()
+
+    if not str(target).startswith(str(workspace.resolve())):
+        raise HTTPException(status_code=400, detail="Invalid file path")
+
+    if not target.exists() or not target.is_file():
+        raise HTTPException(status_code=404, detail="File not found")
+
+    content_type = mimetypes.guess_type(str(target))[0] or "application/octet-stream"
+    return FileResponse(
+        path=str(target),
+        media_type=content_type,
+        filename=target.name,
+    )
